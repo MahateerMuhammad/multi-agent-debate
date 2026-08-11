@@ -1,9 +1,61 @@
 """Opponent Agent: Formulates counter-arguments opposing the topic/proposition."""
 
+from __future__ import annotations
 
-class OpponentAgent:
-    def __init__(self, name: str = "Opponent"):
-        self.name = name
+from typing import Any
 
-    def construct_counter_argument(self, topic: str, proponent_arg: str, evidence: list) -> str:
-        return f"Opponent rebuttal to: {proponent_arg}"
+from app.agents.base import BaseAgent
+from app.llm.base import BaseLLMProvider
+from app.llm.schemas import ArgumentOutput, LLMResponse, RebuttalOutput
+
+
+class OpponentAgent(BaseAgent):
+    """Opponent Agent critically analyzes the proposition and proponent case."""
+
+    def __init__(
+        self,
+        name: str = "Opponent",
+        llm_provider: BaseLLMProvider | None = None,
+    ):
+        super().__init__(
+            name=name,
+            role="Negative Debate Opponent",
+            description=(
+                "Critically analyzes proposition and proponent arguments to build rebuttals."
+            ),
+            llm_provider=llm_provider,
+        )
+
+    @property
+    def agent_type(self) -> str:
+        return "opponent"
+
+    async def construct_rebuttal(
+        self,
+        topic: str,
+        proponent_argument: ArgumentOutput,
+        context: dict[str, Any] | None = None,
+    ) -> LLMResponse[RebuttalOutput]:
+        """Construct a structured counter-argument and rebuttal against the proponent's claim."""
+        clean_topic = self.validate_input(topic)
+
+        system_prompt = self._format_system_prompt(
+            "Your objective is to independently challenge the proposition and identify weaknesses "
+            "in the Proponent's claim and reasoning.\n"
+            "Identify flaws in logic or evidence and provide clear, compelling counter-arguments."
+        )
+
+        user_prompt = (
+            f"Proposition Topic: {clean_topic}\n\n"
+            f"Proponent Asserted Claim: {proponent_argument.claim}\n"
+            f"Proponent Reasoning Points: {', '.join(proponent_argument.reasoning)}\n"
+            f"Proponent Evidence: {', '.join(proponent_argument.supporting_evidence)}"
+        )
+        if context and "background" in context:
+            user_prompt += f"\nBackground Context: {context['background']}"
+
+        return await self.llm_provider.generate_structured(
+            prompt=user_prompt,
+            response_model=RebuttalOutput,
+            system_prompt=system_prompt,
+        )

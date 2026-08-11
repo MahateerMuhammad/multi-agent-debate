@@ -1,5 +1,6 @@
 """Evidence Agent: Verifies claims against retrieved documents or fact-checking databases."""
 
+
 class EvidenceAgent:
     def __init__(self, name: str = "EvidenceVerifier"):
         self.name = name

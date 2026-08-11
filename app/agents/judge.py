@@ -1,5 +1,6 @@
 """Judge Agent: Synthesizes debate rounds and issues a final verdict."""
 
+
 class JudgeAgent:
     def __init__(self, name: str = "Judge"):
         self.name = name

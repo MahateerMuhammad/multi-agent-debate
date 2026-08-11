@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+
 from app.api.routes.debate import router as debate_router
 
 router = APIRouter()

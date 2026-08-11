@@ -1,5 +1,6 @@
 """Automated evaluator judge for offline benchmarks."""
 
+
 class BenchmarkJudge:
     def __init__(self, eval_model: str = "gpt-4o"):
         self.eval_model = eval_model

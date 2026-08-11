@@ -1,5 +1,6 @@
 """Opponent Agent: Formulates counter-arguments opposing the topic/proposition."""
 
+
 class OpponentAgent:
     def __init__(self, name: str = "Opponent"):
         self.name = name

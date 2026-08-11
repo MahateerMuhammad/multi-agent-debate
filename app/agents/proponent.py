@@ -1,5 +1,6 @@
 """Proponent Agent: Formulates arguments in favor of the topic/proposition."""
 
+
 class ProponentAgent:
     def __init__(self, name: str = "Proponent"):
         self.name = name

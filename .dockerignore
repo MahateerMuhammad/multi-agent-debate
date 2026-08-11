@@ -1,0 +1,33 @@
+# Version control
+.git
+.gitignore
+
+# Environment & Secrets
+.env
+.env.*
+
+# Virtual Environments
+.venv
+venv/
+env/
+
+# Caches & Test artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# IDEs & OS files
+.vscode
+.idea
+.DS_Store
+
+# Documentation & Scratch
+README.md
+docs/
+*.md

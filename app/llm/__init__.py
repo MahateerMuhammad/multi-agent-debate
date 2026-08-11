@@ -4,6 +4,7 @@ from app.llm.base import BaseLLMProvider
 from app.llm.exceptions import (
     LLMConfigurationError,
     LLMError,
+    LLMGuardrailError,
     LLMProviderError,
     LLMTimeoutError,
     LLMValidationError,
@@ -28,6 +29,7 @@ __all__ = [
     "LLMTimeoutError",
     "LLMValidationError",
     "LLMProviderError",
+    "LLMGuardrailError",
     "LLMResponse",
     "LLMUsage",
     "ResearcherOutput",

@@ -15,7 +15,7 @@ def get_llm_provider(config: Settings | None = None) -> BaseLLMProvider:
     cfg = config or default_settings
     provider_type = cfg.LLM_PROVIDER.lower()
 
-    if provider_type in ("qwen", "ollama", "vllm", "openrouter", "openai-compatible"):
+    if provider_type in ("openrouter", "qwen", "ollama", "vllm", "openai-compatible"):
         if not cfg.LLM_BASE_URL:
             raise LLMConfigurationError(
                 f"LLM_BASE_URL must be configured for provider '{provider_type}'."
@@ -27,6 +27,8 @@ def get_llm_provider(config: Settings | None = None) -> BaseLLMProvider:
             timeout=cfg.LLM_TIMEOUT,
             max_retries=cfg.LLM_MAX_RETRIES,
             temperature=cfg.LLM_TEMPERATURE,
+            max_tokens=cfg.LLM_MAX_TOKENS,
+            enable_guardrails=cfg.ENABLE_GUARDRAILS,
         )
 
     if provider_type == "mock":
@@ -35,9 +37,11 @@ def get_llm_provider(config: Settings | None = None) -> BaseLLMProvider:
             timeout=cfg.LLM_TIMEOUT,
             max_retries=cfg.LLM_MAX_RETRIES,
             temperature=cfg.LLM_TEMPERATURE,
+            max_tokens=cfg.LLM_MAX_TOKENS,
+            enable_guardrails=cfg.ENABLE_GUARDRAILS,
         )
 
     raise LLMConfigurationError(
         f"Unsupported LLM provider: '{cfg.LLM_PROVIDER}'. "
-        f"Supported providers are: 'qwen', 'ollama', 'vllm', 'openrouter', 'mock'."
+        f"Supported providers are: 'openrouter', 'qwen', 'ollama', 'vllm', 'mock'."
     )

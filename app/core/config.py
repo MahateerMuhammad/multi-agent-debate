@@ -20,13 +20,18 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 
     # Open-Source LLM Configuration (Qwen 2.5 default)
-    LLM_PROVIDER: str = "qwen"  # Options: "qwen", "ollama", "vllm", "openrouter", "mock"
-    LLM_MODEL: str = "qwen2.5-72b-instruct"
-    LLM_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    LLM_API_KEY: str = "qwen_api_key"
+    LLM_PROVIDER: str = "openrouter"  # Options: "openrouter", "qwen", "ollama", "vllm", "mock"
+    LLM_MODEL: str = "qwen/qwen-2.5-72b-instruct:free"
+    LLM_BASE_URL: str = "https://openrouter.ai/api/v1"
+    LLM_API_KEY: str = ""
+
+    # Guardrails & Cost Controls
     LLM_TIMEOUT: float = 30.0
     LLM_MAX_RETRIES: int = 3
     LLM_TEMPERATURE: float = 0.7
+    LLM_MAX_TOKENS: int = 2048  # Hard cap on output generation per request
+    LLM_MAX_DEBATE_ROUNDS: int = 5  # Hard cap on max debate rounds
+    ENABLE_GUARDRAILS: bool = True  # Enforce prompt sanitization & injection defense
 
     VECTORSTORE_DIR: str = "./data/vectorstore"
     PROCESSED_DATA_DIR: str = "./data/processed"

@@ -8,6 +8,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
+from app.llm.exceptions import LLMGuardrailError
 from app.llm.schemas import LLMResponse
 
 T = TypeVar("T", bound=BaseModel)
@@ -24,6 +25,8 @@ class BaseLLMProvider(ABC):
         timeout: float = 30.0,
         max_retries: int = 3,
         temperature: float = 0.7,
+        max_tokens: int = 2048,
+        enable_guardrails: bool = True,
     ):
         self.model_name = model_name
         self.base_url = base_url
@@ -31,11 +34,13 @@ class BaseLLMProvider(ABC):
         self.timeout = timeout
         self.max_retries = max_retries
         self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.enable_guardrails = enable_guardrails
 
     @property
     @abstractmethod
     def provider_name(self) -> str:
-        """Name of the provider (e.g. 'qwen', 'ollama', 'mock')."""
+        """Name of the provider (e.g. 'qwen', 'openrouter', 'ollama', 'mock')."""
         pass
 
     @abstractmethod
@@ -58,6 +63,28 @@ class BaseLLMProvider(ABC):
     ) -> LLMResponse[T]:
         """Generate structured data conforming to a Pydantic response model."""
         pass
+
+    def validate_prompt(self, prompt: str) -> None:
+        """Validate input prompt against length and prompt-injection guardrails."""
+        if not self.enable_guardrails:
+            return
+
+        if len(prompt) > 16000:
+            raise LLMGuardrailError(
+                "Input prompt exceeds maximum allowed length of 16,000 characters."
+            )
+
+        # Guardrail check for prompt injection patterns
+        injection_patterns = [
+            r"ignore\s+previous\s+instructions",
+            r"disregard\s+all\s+prior\s+prompts",
+            r"reveal\s+system\s+prompt",
+        ]
+        for pattern in injection_patterns:
+            if re.search(pattern, prompt, re.IGNORECASE):
+                raise LLMGuardrailError(
+                    "Prompt injection or unauthorized override pattern detected."
+                )
 
     def _sanitize_log(self, text: str) -> str:
         """Sanitize sensitive credentials, API keys, and authorization headers from logs."""

@@ -43,6 +43,8 @@ class MockLLMProvider(BaseLLMProvider):
         system_prompt: str | None = None,
         **kwargs: object,
     ) -> LLMResponse[str]:
+        self.validate_prompt(prompt)
+
         if self.simulate_timeout:
             raise LLMTimeoutError(f"Mock request timed out after {self.timeout}s")
 
@@ -70,6 +72,8 @@ class MockLLMProvider(BaseLLMProvider):
         system_prompt: str | None = None,
         **kwargs: object,
     ) -> LLMResponse[T]:
+        self.validate_prompt(prompt)
+
         if self.simulate_timeout:
             raise LLMTimeoutError(f"Mock structured request timed out after {self.timeout}s")
 

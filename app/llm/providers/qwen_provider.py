@@ -31,12 +31,14 @@ class QwenProvider(BaseLLMProvider):
 
     def __init__(
         self,
-        model_name: str = "qwen2.5-72b-instruct",
-        base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model_name: str = "qwen/qwen-2.5-72b-instruct:free",
+        base_url: str = "https://openrouter.ai/api/v1",
         api_key: str = "",
         timeout: float = 30.0,
         max_retries: int = 3,
         temperature: float = 0.7,
+        max_tokens: int = 2048,
+        enable_guardrails: bool = True,
     ):
         super().__init__(
             model_name=model_name,
@@ -45,6 +47,8 @@ class QwenProvider(BaseLLMProvider):
             timeout=timeout,
             max_retries=max_retries,
             temperature=temperature,
+            max_tokens=max_tokens,
+            enable_guardrails=enable_guardrails,
         )
         if not self.base_url:
             raise LLMConfigurationError("LLM base_url must be provided for QwenProvider.")
@@ -65,7 +69,9 @@ class QwenProvider(BaseLLMProvider):
         system_prompt: str | None = None,
         **kwargs: object,
     ) -> LLMResponse[str]:
-        """Generate text completion from Qwen model."""
+        """Generate text completion from Qwen model with guardrail validation."""
+        self.validate_prompt(prompt)
+
         endpoint = f"{self.base_url.rstrip('/')}/chat/completions"
         messages = []
         if system_prompt:
@@ -76,6 +82,7 @@ class QwenProvider(BaseLLMProvider):
             "model": self.model_name,
             "messages": messages,
             "temperature": kwargs.get("temperature", self.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
         }
 
         start_time = time.perf_counter()
@@ -152,6 +159,8 @@ class QwenProvider(BaseLLMProvider):
         **kwargs: object,
     ) -> LLMResponse[T]:
         """Generate structured response matching Pydantic response_model schema."""
+        self.validate_prompt(prompt)
+
         schema_json = json.dumps(response_model.model_json_schema(), indent=2)
         format_instruction = (
             "\n\nYou MUST respond ONLY with a valid JSON object matching the following schema:\n"

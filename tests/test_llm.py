@@ -14,8 +14,9 @@ from app.llm.providers.mock import MockLLMProvider
 from app.llm.providers.qwen_provider import QwenProvider
 from app.llm.schemas import (
     ArgumentOutput,
+    JudgeOutput,
     ResearcherOutput,
-    VerdictOutput,
+    RubricDimensionScore,
 )
 
 
@@ -159,12 +160,20 @@ async def test_structured_schemas_instantiation() -> None:
     assert arg.claim.startswith("Open Source")
     assert arg.confidence == 0.95
 
-    verdict = VerdictOutput(
-        winner="Proponent",
-        summary="Proponent presented verifiable evidence",
+    judge = JudgeOutput(
+        winner="Position A",
+        verdict_summary="Position A presented verifiable evidence",
+        rubric_scores=[
+            RubricDimensionScore(
+                dimension="correctness",
+                score_a=0.9,
+                score_b=0.7,
+                justification="Factually accurate",
+            )
+        ],
+        total_score_a=0.9,
+        total_score_b=0.7,
         key_deciding_factors=["Factuality", "Logical consistency"],
-        proponent_score=0.9,
-        opponent_score=0.7,
     )
-    assert verdict.winner == "Proponent"
-    assert verdict.proponent_score > verdict.opponent_score
+    assert judge.winner == "Position A"
+    assert judge.total_score_a > judge.total_score_b

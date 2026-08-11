@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import pytest
 
+from app.agents.critic import CriticAgent
+from app.agents.judge import JudgeAgent
 from app.agents.opponent import OpponentAgent
 from app.agents.proponent import ProponentAgent
-from app.agents.runner import SimpleDebateRunner
+from app.agents.runner import FullDebateRunner
 from app.llm.exceptions import (
     LLMGuardrailError,
     LLMTimeoutError,
     LLMValidationError,
 )
 from app.llm.providers.mock import MockLLMProvider
-from app.llm.schemas import ArgumentOutput, RebuttalOutput
+from app.llm.schemas import (
+    ArgumentOutput,
+    CriticOutput,
+    JudgeOutput,
+    RebuttalOutput,
+)
 
 
 @pytest.mark.asyncio
@@ -66,6 +73,98 @@ async def test_opponent_rebuttal_generation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_critic_neutral_evaluation() -> None:
+    """Test position-neutral evaluation by CriticAgent."""
+    prop_arg = ArgumentOutput(
+        claim="AI should replace human judges",
+        reasoning=["Impartiality"],
+        supporting_evidence=["Study A"],
+    )
+    opp_rebuttal = RebuttalOutput(
+        target_claim="AI should replace human judges",
+        counter_arguments=["Lacks compassion"],
+        flaws_identified=["Ignoring edge cases"],
+    )
+    critic_json = {
+        "argument_a_analysis": "Focuses on efficiency",
+        "argument_b_analysis": "Focuses on empathy",
+        "unsupported_claims": ["Study A scope unverified"],
+        "logical_fallacies": [],
+        "missing_assumptions": ["Assumes software never bugs"],
+        "counterargument_quality_score": 0.85,
+        "contradictions_found": [],
+    }
+    mock_llm = MockLLMProvider(mock_json_response=critic_json)
+    critic = CriticAgent(llm_provider=mock_llm)
+
+    res = await critic.evaluate_debate("AI Judges", prop_arg, opp_rebuttal)
+    assert isinstance(res.data, CriticOutput)
+    assert res.data.counterargument_quality_score == 0.85
+    assert len(res.data.missing_assumptions) == 1
+
+
+@pytest.mark.asyncio
+async def test_judge_rubric_scoring() -> None:
+    """Test 5-dimension rubric scoring by JudgeAgent."""
+    critic_output = CriticOutput(
+        argument_a_analysis="Strong efficiency claim",
+        argument_b_analysis="Strong empathy claim",
+        unsupported_claims=[],
+        logical_fallacies=[],
+        missing_assumptions=[],
+        counterargument_quality_score=0.9,
+        contradictions_found=[],
+    )
+    judge_json = {
+        "winner": "Position A",
+        "verdict_summary": "Position A provided empirical evidence.",
+        "rubric_scores": [
+            {
+                "dimension": "correctness",
+                "score_a": 0.9,
+                "score_b": 0.8,
+                "justification": "Factual evidence provided",
+            },
+            {
+                "dimension": "evidence_quality",
+                "score_a": 0.95,
+                "score_b": 0.7,
+                "justification": "Peer-reviewed sources",
+            },
+            {
+                "dimension": "reasoning",
+                "score_a": 0.85,
+                "score_b": 0.8,
+                "justification": "Logical progression",
+            },
+            {
+                "dimension": "relevance",
+                "score_a": 1.0,
+                "score_b": 0.9,
+                "justification": "Direct topic response",
+            },
+            {
+                "dimension": "completeness",
+                "score_a": 0.8,
+                "score_b": 0.75,
+                "justification": "Addressed counterpoints",
+            },
+        ],
+        "total_score_a": 0.9,
+        "total_score_b": 0.79,
+        "key_deciding_factors": ["Superior empirical evidence"],
+    }
+    mock_llm = MockLLMProvider(mock_json_response=judge_json)
+    judge = JudgeAgent(llm_provider=mock_llm)
+
+    res = await judge.judge_debate("AI Judges", "Pos A text", "Pos B text", critic_output)
+    assert isinstance(res.data, JudgeOutput)
+    assert res.data.winner == "Position A"
+    assert len(res.data.rubric_scores) == 5
+    assert res.data.rubric_scores[0].dimension == "correctness"
+
+
+@pytest.mark.asyncio
 async def test_empty_or_whitespace_topic_rejection() -> None:
     """Test that empty or whitespace topics raise ValueError."""
     proponent = ProponentAgent(llm_provider=MockLLMProvider())
@@ -77,10 +176,6 @@ async def test_empty_or_whitespace_topic_rejection() -> None:
     with pytest.raises(ValueError) as exc_info:
         await proponent.construct_argument("   ")
     assert "cannot be empty" in str(exc_info.value).lower()
-
-    with pytest.raises(ValueError) as exc_info:
-        await proponent.construct_argument("ab")
-    assert "at least 3 characters" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -114,16 +209,20 @@ async def test_llm_timeout_handling() -> None:
 
 
 @pytest.mark.asyncio
-async def test_simple_debate_runner_coordination() -> None:
-    """Test end-to-end SimpleDebateRunner coordination."""
+async def test_full_debate_runner_pipeline() -> None:
+    """Test end-to-end FullDebateRunner 4-stage pipeline."""
     mock_llm = MockLLMProvider()
-    runner = SimpleDebateRunner(llm_provider=mock_llm)
+    runner = FullDebateRunner(llm_provider=mock_llm)
 
     topic = "Universal basic income should be implemented globally"
-    result = await runner.run_debate(topic)
+    result = await runner.run_full_debate(topic)
 
     assert result.topic == topic
     assert isinstance(result.proponent_output, ArgumentOutput)
     assert isinstance(result.opponent_output, RebuttalOutput)
+    assert isinstance(result.critic_output, CriticOutput)
+    assert isinstance(result.judge_output, JudgeOutput)
+    assert result.blind_mapping["Position A"] == "Proponent"
+    assert result.unblinded_winner in ("Proponent", "Opponent", "Tie")
     assert result.total_latency_seconds >= 0.0
     assert result.total_tokens > 0

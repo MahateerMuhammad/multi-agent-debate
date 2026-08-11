@@ -12,13 +12,14 @@ from app.llm.exceptions import (
 from app.llm.factory import get_llm_provider
 from app.llm.schemas import (
     ArgumentOutput,
-    CritiqueOutput,
+    CriticOutput,
     EvidenceVerificationOutput,
+    JudgeOutput,
     LLMResponse,
     LLMUsage,
     RebuttalOutput,
     ResearcherOutput,
-    VerdictOutput,
+    RubricDimensionScore,
 )
 
 __all__ = [
@@ -35,7 +36,8 @@ __all__ = [
     "ResearcherOutput",
     "ArgumentOutput",
     "RebuttalOutput",
-    "CritiqueOutput",
+    "CriticOutput",
+    "JudgeOutput",
+    "RubricDimensionScore",
     "EvidenceVerificationOutput",
-    "VerdictOutput",
 ]

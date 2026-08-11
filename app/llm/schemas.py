@@ -1,5 +1,7 @@
 """Pydantic data models and structured output schemas for LLM responses and debate agents."""
 
+from __future__ import annotations
+
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
@@ -61,15 +63,30 @@ class RebuttalOutput(BaseModel):
     )
 
 
-class CritiqueOutput(BaseModel):
-    """Structured evaluation of reasoning quality produced by a Critic agent."""
+class CriticOutput(BaseModel):
+    """Structured position-neutral evaluation produced by a Critic agent."""
 
-    argument_evaluated: str = Field(..., description="The argument that was evaluated")
+    argument_a_analysis: str = Field(
+        ..., description="Neutral analysis of Argument A strengths/weaknesses"
+    )
+    argument_b_analysis: str = Field(
+        ..., description="Neutral analysis of Argument B strengths/weaknesses"
+    )
+    unsupported_claims: list[str] = Field(
+        default_factory=list, description="Claims lacking supporting evidence"
+    )
     logical_fallacies: list[str] = Field(
         default_factory=list, description="Identified logical fallacies"
     )
-    coherence_score: float = Field(..., ge=0.0, le=1.0, description="Coherence score (0 to 1)")
-    suggestions: list[str] = Field(default_factory=list, description="Suggestions for improvement")
+    missing_assumptions: list[str] = Field(
+        default_factory=list, description="Unstated or questionable assumptions"
+    )
+    counterargument_quality_score: float = Field(
+        ..., ge=0.0, le=1.0, description="Quality rating of counterarguments (0 to 1)"
+    )
+    contradictions_found: list[str] = Field(
+        default_factory=list, description="Contradictions within or between arguments"
+    )
 
 
 class EvidenceVerificationOutput(BaseModel):
@@ -81,15 +98,32 @@ class EvidenceVerificationOutput(BaseModel):
     reasoning: str = Field(..., description="Justification for verification decision")
 
 
-class VerdictOutput(BaseModel):
+class RubricDimensionScore(BaseModel):
+    """Score and justification for a single rubric evaluation dimension."""
+
+    dimension: str = Field(
+        ...,
+        description="Rubric dimension name (correctness, evidence_quality, reasoning, relevance)",
+    )
+    score_a: float = Field(..., ge=0.0, le=1.0, description="Score for Position A (0.0 to 1.0)")
+    score_b: float = Field(..., ge=0.0, le=1.0, description="Score for Position B (0.0 to 1.0)")
+    justification: str = Field(
+        ..., description="Detailed explanation justifying the dimension score"
+    )
+
+
+class JudgeOutput(BaseModel):
     """Structured final evaluation and winner determination produced by a Judge agent."""
 
-    winner: str = Field(..., description="The winning side (e.g. Proponent or Opponent)")
-    summary: str = Field(..., description="Summary justification for the final verdict")
+    winner: str = Field(..., description="Declared winner ('Position A', 'Position B', or 'Tie')")
+    verdict_summary: str = Field(
+        ..., description="Comprehensive explanation of final verdict decision"
+    )
+    rubric_scores: list[RubricDimensionScore] = Field(
+        ..., description="Detailed 5-dimension rubric scores with explanations"
+    )
+    total_score_a: float = Field(..., ge=0.0, le=1.0, description="Overall score for Position A")
+    total_score_b: float = Field(..., ge=0.0, le=1.0, description="Overall score for Position B")
     key_deciding_factors: list[str] = Field(
-        ..., description="Deciding factors in the determination"
+        ..., description="Primary deciding factors leading to the verdict"
     )
-    proponent_score: float = Field(
-        ..., ge=0.0, le=1.0, description="Proponent score between 0 and 1"
-    )
-    opponent_score: float = Field(..., ge=0.0, le=1.0, description="Opponent score between 0 and 1")

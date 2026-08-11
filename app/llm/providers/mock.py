@@ -112,10 +112,11 @@ class MockLLMProvider(BaseLLMProvider):
         """Construct fallback mock JSON matching required Pydantic model fields."""
         schema = response_model.model_json_schema()
         properties = schema.get("properties", {})
+        defs = schema.get("$defs", {})
         dummy_data: dict[str, Any] = {}
 
         for prop_name, prop_schema in properties.items():
-            prop_type = prop_schema.get("type", "string")
+            prop_type = prop_schema.get("type")
             if prop_type == "string":
                 dummy_data[prop_name] = f"Mock {prop_name}"
             elif prop_type == "integer":
@@ -125,7 +126,25 @@ class MockLLMProvider(BaseLLMProvider):
             elif prop_type == "boolean":
                 dummy_data[prop_name] = True
             elif prop_type == "array":
-                dummy_data[prop_name] = [f"Mock {prop_name} item"]
+                items_schema = prop_schema.get("items", {})
+                ref = items_schema.get("$ref")
+                if ref:
+                    def_name = ref.split("/")[-1]
+                    def_props = defs.get(def_name, {}).get("properties", {})
+                    nested: dict[str, Any] = {}
+                    for p, s in def_props.items():
+                        stype = s.get("type", "string")
+                        if stype == "string":
+                            nested[p] = f"Mock {p}"
+                        elif stype in ("number", "integer"):
+                            nested[p] = 0.9
+                        elif stype == "boolean":
+                            nested[p] = True
+                        else:
+                            nested[p] = f"Mock {p}"
+                    dummy_data[prop_name] = [nested]
+                else:
+                    dummy_data[prop_name] = [f"Mock {prop_name} item"]
             else:
                 dummy_data[prop_name] = "Mock value"
 

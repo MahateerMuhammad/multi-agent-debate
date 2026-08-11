@@ -19,12 +19,17 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 
-    OPENAI_API_KEY: str = ""
-    ANTHROPIC_API_KEY: str = ""
-    SERPER_API_KEY: str = ""
+    # Open-Source LLM Configuration (Qwen 2.5 default)
+    LLM_PROVIDER: str = "qwen"  # Options: "qwen", "ollama", "vllm", "openrouter", "mock"
+    LLM_MODEL: str = "qwen2.5-72b-instruct"
+    LLM_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    LLM_API_KEY: str = "qwen_api_key"
+    LLM_TIMEOUT: float = 30.0
+    LLM_MAX_RETRIES: int = 3
+    LLM_TEMPERATURE: float = 0.7
 
     VECTORSTORE_DIR: str = "./data/vectorstore"
-    PROCESSED_DATA_DIR: str = "./data/raw"
+    PROCESSED_DATA_DIR: str = "./data/processed"
     RAW_DATA_DIR: str = "./data/raw"
 
     model_config = SettingsConfigDict(

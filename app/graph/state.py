@@ -15,6 +15,7 @@ class DebateState(TypedDict, total=False):
     improvement_threshold: float
     proponent_history: list[dict[str, Any]]
     opponent_history: list[dict[str, Any]]
+    evidence_history: list[dict[str, Any]]
     critic_history: list[dict[str, Any]]
     judge_history: list[dict[str, Any]]
     is_finished: bool

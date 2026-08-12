@@ -93,9 +93,16 @@ class EvidenceVerificationOutput(BaseModel):
     """Structured verification output produced by an Evidence verification agent."""
 
     claim: str = Field(..., description="The claim being verified")
-    is_verified: bool = Field(..., description="True if verified by available evidence")
+    status: str = Field(
+        ...,
+        description="Status: supported | partially_supported | contradicted | insufficient",
+    )
+    is_verified: bool = Field(..., description="True if status is supported or partially_supported")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Verification confidence score")
     reasoning: str = Field(..., description="Justification for verification decision")
+    sources_cited: list[str] = Field(
+        default_factory=list, description="Preserved source titles, URLs, or DOIs"
+    )
 
 
 class RubricDimensionScore(BaseModel):

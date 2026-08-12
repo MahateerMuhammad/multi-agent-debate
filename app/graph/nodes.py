@@ -1,16 +1,19 @@
-"""LangGraph node functions executing Proponent, Opponent, Critic, and Judge agents."""
+"""LangGraph node functions executing Proponent, Opponent, Evidence, Critic, and Judge agents."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from app.agents.critic import CriticAgent
+from app.agents.evidence import EvidenceAgent
 from app.agents.judge import JudgeAgent
 from app.agents.opponent import OpponentAgent
 from app.agents.proponent import ProponentAgent
 from app.graph.state import DebateState
 from app.llm.base import BaseLLMProvider
 from app.llm.schemas import ArgumentOutput, RebuttalOutput
+from app.retrieval.retriever import EvidenceRetriever
+from app.retrieval.vectorstore import QdrantVectorStore
 
 
 async def proponent_node(
@@ -68,6 +71,47 @@ async def opponent_node(
         }
     except Exception as e:
         errors.append(f"opponent_node failure: {e}")
+        return {"errors": errors}
+
+
+async def evidence_node(
+    state: DebateState,
+    llm_provider: BaseLLMProvider | None = None,
+    vector_store: Any | None = None,
+) -> dict[str, Any]:
+    """Execute Evidence Verification node auditing claims against Qdrant vector store."""
+    topic = state.get("topic", "")
+    errors = list(state.get("errors", []))
+    prop_hist = state.get("proponent_history", [])
+
+    if not prop_hist:
+        errors.append("evidence_node failure: missing proponent_history")
+        return {"errors": errors}
+
+    try:
+        latest_prop = ArgumentOutput.model_validate(prop_hist[-1])
+        store = vector_store or QdrantVectorStore()
+        retriever = EvidenceRetriever(vector_store=store)
+
+        search_results = retriever.retrieve_evidence(query=latest_prop.claim, top_k=3)
+        context_text = retriever.sanitize_and_wrap_context(search_results)
+
+        agent = EvidenceAgent(llm_provider=llm_provider)
+        res = await agent.verify_evidence(
+            topic=topic, claim=latest_prop.claim, retrieved_context=context_text
+        )
+        ev_dict = res.data.model_dump()
+
+        ev_hist = list(state.get("evidence_history", []))
+        ev_hist.append(ev_dict)
+
+        return {
+            "evidence_history": ev_hist,
+            "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
+            "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
+        }
+    except Exception as e:
+        errors.append(f"evidence_node failure: {e}")
         return {"errors": errors}
 
 

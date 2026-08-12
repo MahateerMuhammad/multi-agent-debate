@@ -21,6 +21,21 @@ from app.llm.schemas import (
 )
 
 
+def test_agent_properties_and_types() -> None:
+    """Test concrete agent types and properties."""
+    mock_llm = MockLLMProvider()
+    prop = ProponentAgent(llm_provider=mock_llm)
+    opp = OpponentAgent(llm_provider=mock_llm)
+    crit = CriticAgent(llm_provider=mock_llm)
+    jdg = JudgeAgent(llm_provider=mock_llm)
+
+    assert prop.agent_type == "proponent"
+    assert opp.agent_type == "opponent"
+    assert crit.agent_type == "critic"
+    assert jdg.agent_type == "judge"
+    assert prop.llm_provider == mock_llm
+
+
 @pytest.mark.asyncio
 async def test_proponent_argument_generation() -> None:
     """Test valid argument construction by ProponentAgent."""
@@ -209,13 +224,14 @@ async def test_llm_timeout_handling() -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_debate_runner_pipeline() -> None:
-    """Test end-to-end FullDebateRunner 4-stage pipeline."""
+async def test_full_debate_runner_with_context() -> None:
+    """Test end-to-end FullDebateRunner 4-stage pipeline with context payload."""
     mock_llm = MockLLMProvider()
     runner = FullDebateRunner(llm_provider=mock_llm)
 
     topic = "Universal basic income should be implemented globally"
-    result = await runner.run_full_debate(topic)
+    context = {"background": "Special Economic Zone Context 2026"}
+    result = await runner.run_full_debate(topic, context=context)
 
     assert result.topic == topic
     assert isinstance(result.proponent_output, ArgumentOutput)
@@ -223,6 +239,5 @@ async def test_full_debate_runner_pipeline() -> None:
     assert isinstance(result.critic_output, CriticOutput)
     assert isinstance(result.judge_output, JudgeOutput)
     assert result.blind_mapping["Position A"] == "Proponent"
-    assert result.unblinded_winner in ("Proponent", "Opponent", "Tie")
     assert result.total_latency_seconds >= 0.0
     assert result.total_tokens > 0

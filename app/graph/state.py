@@ -1,15 +1,24 @@
-"""State definition for the debate LangGraph state machine."""
+"""Typed debate state representation for LangGraph workflow orchestration."""
 
-import operator
-from typing import Annotated, TypedDict
+from __future__ import annotations
+
+from typing import Any, TypedDict
 
 
-class DebateState(TypedDict):
+class DebateState(TypedDict, total=False):
+    """Typed state dictionary passed through the LangGraph debate workflow."""
+
     topic: str
-    rounds: int
     current_round: int
-    research_notes: list[str]
-    proponent_arguments: Annotated[list[str], operator.add]
-    opponent_arguments: Annotated[list[str], operator.add]
-    critiques: Annotated[list[str], operator.add]
-    verdict: str
+    max_rounds: int
+    confidence_threshold: float
+    improvement_threshold: float
+    proponent_history: list[dict[str, Any]]
+    opponent_history: list[dict[str, Any]]
+    critic_history: list[dict[str, Any]]
+    judge_history: list[dict[str, Any]]
+    is_finished: bool
+    stop_reason: str
+    total_latency: float
+    total_tokens: int
+    errors: list[str]

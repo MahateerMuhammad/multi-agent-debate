@@ -1,33 +1,45 @@
-"""LangGraph workflow definition for multi-agent debate."""
+"""Assembly and compilation of the LangGraph multi-agent debate workflow graph."""
 
+from __future__ import annotations
+
+from functools import partial
 from typing import Any
 
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, START, StateGraph
 
-from app.graph.nodes import (
-    critic_node,
-    judge_node,
-    opponent_node,
-    proponent_node,
-    research_node,
-)
+from app.graph.edges import should_continue
+from app.graph.nodes import critic_node, judge_node, opponent_node, proponent_node
 from app.graph.state import DebateState
+from app.llm.base import BaseLLMProvider
 
 
-def create_debate_workflow() -> Any:
-    workflow = StateGraph(DebateState)
+def build_debate_graph(llm_provider: BaseLLMProvider | None = None) -> Any:
+    """Build and compile the multi-agent debate LangGraph workflow."""
+    builder = StateGraph(DebateState)
 
-    workflow.add_node("research", research_node)
-    workflow.add_node("proponent", proponent_node)
-    workflow.add_node("opponent", opponent_node)
-    workflow.add_node("critic", critic_node)
-    workflow.add_node("judge", judge_node)
+    # Bind provider parameter to node functions
+    prop_fn = partial(proponent_node, llm_provider=llm_provider)
+    opp_fn = partial(opponent_node, llm_provider=llm_provider)
+    crit_fn = partial(critic_node, llm_provider=llm_provider)
+    jdg_fn = partial(judge_node, llm_provider=llm_provider)
 
-    workflow.set_entry_point("research")
-    workflow.add_edge("research", "proponent")
-    workflow.add_edge("proponent", "opponent")
-    workflow.add_edge("opponent", "critic")
-    workflow.add_edge("critic", "judge")
-    workflow.add_edge("judge", END)
+    builder.add_node("proponent", prop_fn)
+    builder.add_node("opponent", opp_fn)
+    builder.add_node("critic", crit_fn)
+    builder.add_node("judge", jdg_fn)
 
-    return workflow.compile()
+    builder.add_edge(START, "proponent")
+    builder.add_edge("proponent", "opponent")
+    builder.add_edge("opponent", "critic")
+    builder.add_edge("critic", "judge")
+
+    builder.add_conditional_edges(
+        "judge",
+        should_continue,
+        {
+            "proponent": "proponent",
+            "end": END,
+        },
+    )
+
+    return builder.compile()

@@ -1,9 +1,25 @@
-"""Automated evaluator judge for offline benchmarks."""
+"""Evaluation Judge re-exports and quality auditing tools."""
 
+from app.evaluation.benchmarks import (
+    BENCHMARK_SUITE,
+    BenchmarkReport,
+    BenchmarkTestCase,
+    run_benchmark_evaluations,
+)
+from app.evaluation.metrics import (
+    compute_argument_coherence,
+    compute_fallacy_density,
+    compute_rebuttal_directness,
+    compute_rubric_composite_score,
+)
 
-class BenchmarkJudge:
-    def __init__(self, eval_model: str = "gpt-4o"):
-        self.eval_model = eval_model
-
-    def evaluate_session(self, debate_history: list) -> dict:
-        return {"coherence_score": 0.9, "persuasiveness_score": 0.85}
+__all__ = [
+    "compute_argument_coherence",
+    "compute_fallacy_density",
+    "compute_rebuttal_directness",
+    "compute_rubric_composite_score",
+    "BenchmarkTestCase",
+    "BenchmarkReport",
+    "BENCHMARK_SUITE",
+    "run_benchmark_evaluations",
+]

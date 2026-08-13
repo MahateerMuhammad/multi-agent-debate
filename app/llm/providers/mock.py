@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, TypeVar
 
@@ -87,7 +88,7 @@ class MockLLMProvider(BaseLLMProvider):
         if self.mock_json_response is not None:
             raw_str = json.dumps(self.mock_json_response)
         else:
-            raw_str = self._generate_default_json(response_model)
+            raw_str = self._generate_default_json(response_model, prompt=prompt)
 
         try:
             validated_data = response_model.model_validate_json(raw_str)
@@ -108,23 +109,96 @@ class MockLLMProvider(BaseLLMProvider):
             provider=self.provider_name,
         )
 
-    def _generate_default_json(self, response_model: type[BaseModel]) -> str:
-        """Construct fallback mock JSON matching required Pydantic model fields."""
+    def _generate_default_json(
+        self, response_model: type[BaseModel], prompt: str = ""
+    ) -> str:
+        """Construct query-sensitive, role-aware, and round-dependent mock JSON."""
         schema = response_model.model_json_schema()
         properties = schema.get("properties", {})
         defs = schema.get("$defs", {})
         dummy_data: dict[str, Any] = {}
 
+        prompt_hash = abs(hash(prompt))
+        doc_ids = re.findall(r"\b[A-Z0-9]{3,}(?:-[A-Z0-9]+)+\b", prompt)
+        doc_ids_unique = list(dict.fromkeys(doc_ids))
+
+        # Extract active debate round from prompt if present
+        round_match = re.search(r"Round:?\s*(\d+)", prompt, re.IGNORECASE)
+        round_num = int(round_match.group(1)) if round_match else 1
+
+        # Query topic classification
+        prompt_lower = prompt.lower()
+        if "open-source" in prompt_lower or "cset" in prompt_lower:
+            topic_key = "opensource"
+        elif "traffic" in prompt_lower or "judge" in prompt_lower or "court" in prompt_lower:
+            topic_key = "legal"
+        else:
+            topic_key = "ubi"
+
         for prop_name, prop_schema in properties.items():
             prop_type = prop_schema.get("type")
-            if prop_type == "string":
-                dummy_data[prop_name] = f"Mock {prop_name}"
-            elif prop_type == "integer":
-                dummy_data[prop_name] = 1
-            elif prop_type == "number":
-                dummy_data[prop_name] = 0.95
+
+            if prop_name in ("claim", "target_claim"):
+                if topic_key == "opensource":
+                    dummy_data[prop_name] = (
+                        f"Round {round_num}: Open-source AI models democratize security "
+                        "research and mitigate single-vendor systemic dependency risk."
+                    )
+                elif topic_key == "legal":
+                    dummy_data[prop_name] = (
+                        f"Round {round_num}: Automated judicial algorithms risk violating "
+                        "procedural due process standards in municipal traffic court."
+                    )
+                else:
+                    dummy_data[prop_name] = (
+                        f"Round {round_num}: Universal basic income stabilizes aggregate "
+                        "consumer demand during technology-driven labor market transitions."
+                    )
+
+            elif prop_name == "winner":
+                dummy_data[prop_name] = (
+                    "Position A" if (prompt_hash + round_num) % 2 == 0 else "Position B"
+                )
+
+            elif prop_name in ("verdict_summary", "verdict_rationale", "summary"):
+                if round_num == 1:
+                    dummy_data[prop_name] = (
+                        f"Round 1 preliminary evaluation on {topic_key}: Position A "
+                        "demonstrates initial structural coherence, but key counter-evidence "
+                        "remains unaddressed."
+                    )
+                elif round_num == 2:
+                    dummy_data[prop_name] = (
+                        f"Round 2 intermediate synthesis on {topic_key}: Position B "
+                        "introduced compelling rebuttals regarding empirical risk parameters "
+                        "and procedural flaws."
+                    )
+                else:
+                    dummy_data[prop_name] = (
+                        f"Round 3 final adjudication on {topic_key}: Comprehensive "
+                        "multi-round synthesis confirms preponderance of grounded evidence "
+                        "favors the affirmative case."
+                    )
+
+            elif prop_type == "string":
+                dummy_data[prop_name] = (
+                    f"Mock {prop_name} statement for {topic_key} round {round_num}"
+                )
+
+            elif prop_type in ("number", "integer"):
+                if prop_name in ("total_score_a", "total_score_b"):
+                    # Gradually increase score across rounds to test adaptive stopping thresholds
+                    base_score = 0.72 + (round_num * 0.08) + ((prompt_hash % 5) / 100.0)
+                    dummy_data[prop_name] = round(min(base_score, 0.96), 2)
+                elif prop_name == "confidence":
+                    conf_val = 0.75 + (round_num * 0.06) + ((prompt_hash % 7) / 100.0)
+                    dummy_data[prop_name] = round(min(conf_val, 0.94), 2)
+                else:
+                    dummy_data[prop_name] = round(0.70 + (prompt_hash % 25) / 100.0, 2)
+
             elif prop_type == "boolean":
                 dummy_data[prop_name] = True
+
             elif prop_type == "array":
                 items_schema = prop_schema.get("items", {})
                 ref = items_schema.get("$ref")
@@ -135,16 +209,68 @@ class MockLLMProvider(BaseLLMProvider):
                     for p, s in def_props.items():
                         stype = s.get("type", "string")
                         if stype == "string":
-                            nested[p] = f"Mock {p}"
+                            nested[p] = f"Rubric evaluation for {p} in round {round_num}"
                         elif stype in ("number", "integer"):
-                            nested[p] = 0.9
+                            nested[p] = round(0.70 + (round_num * 0.05), 2)
                         elif stype == "boolean":
                             nested[p] = True
                         else:
                             nested[p] = f"Mock {p}"
                     dummy_data[prop_name] = [nested]
                 else:
-                    dummy_data[prop_name] = [f"Mock {prop_name} item"]
+                    is_cite = prop_name in ("supporting_evidence", "sources_cited", "citations")
+                    if is_cite and doc_ids_unique:
+                        dummy_data[prop_name] = doc_ids_unique
+                    elif is_cite:
+                        if topic_key == "opensource":
+                            dummy_data[prop_name] = (
+                                ["CSET-2026-01"]
+                                if round_num == 1
+                                else ["CSET-2026-01", "NIST-AI-6001"]
+                            )
+                        elif topic_key == "legal":
+                            dummy_data[prop_name] = ["NJAT-2025-04"]
+                        else:
+                            dummy_data[prop_name] = []
+
+                    elif prop_name == "reasoning":
+                        if topic_key == "opensource":
+                            dummy_data[prop_name] = [
+                                "Public code visibility enables global vulnerability auditing.",
+                                "Monolithic API lock-in creates single point vulnerability.",
+                            ] if round_num == 1 else [
+                                "Public code visibility enables global vulnerability auditing.",
+                                "Monolithic API lock-in creates single point vulnerability.",
+                                f"Round {round_num} safety benchmarks show open resilience.",
+                            ]
+                        elif topic_key == "legal":
+                            dummy_data[prop_name] = [
+                                "Algorithmic decision systems lack human discretionary nuance.",
+                                "Evidentiary validation standards require cross-examination.",
+                            ]
+                        else:
+                            dummy_data[prop_name] = [
+                                "Direct cash transfers preserve consumer purchasing power."
+                            ]
+
+                    elif prop_name == "counter_arguments":
+                        if topic_key == "opensource":
+                            dummy_data[prop_name] = [
+                                f"Round {round_num} rebuttal: Open weight distribution risk."
+                            ]
+                        else:
+                            dummy_data[prop_name] = [
+                                f"Round {round_num} rebuttal: Automated sensors reduce bias."
+                            ]
+
+
+
+                    elif prop_name == "logical_fallacies":
+                        has_fallacy = (prompt_hash + round_num) % 3 == 0
+                        dummy_data[prop_name] = ["hasty_generalization"] if has_fallacy else []
+
+                    else:
+                        dummy_data[prop_name] = [f"Item for {topic_key} round {round_num}"]
             else:
                 dummy_data[prop_name] = "Mock value"
 

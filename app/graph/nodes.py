@@ -11,7 +11,7 @@ from app.agents.opponent import OpponentAgent
 from app.agents.proponent import ProponentAgent
 from app.graph.state import DebateState
 from app.llm.base import BaseLLMProvider
-from app.llm.schemas import ArgumentOutput, RebuttalOutput
+from app.llm.schemas import ArgumentOutput, CriticOutput, RebuttalOutput
 from app.retrieval.retriever import EvidenceRetriever
 from app.retrieval.vectorstore import QdrantVectorStore
 
@@ -22,11 +22,13 @@ async def proponent_node(
 ) -> dict[str, Any]:
     """Execute Proponent agent node and append argument to state history."""
     topic = state.get("topic", "")
+    curr_round = state.get("current_round", 0) + 1
+    round_topic = f"{topic} [Debate Round {curr_round}]"
     errors = list(state.get("errors", []))
 
     try:
         agent = ProponentAgent(llm_provider=llm_provider)
-        res = await agent.construct_argument(topic)
+        res = await agent.construct_argument(round_topic)
         arg_dict = res.data.model_dump()
 
         prop_hist = list(state.get("proponent_history", []))
@@ -48,6 +50,8 @@ async def opponent_node(
 ) -> dict[str, Any]:
     """Execute Opponent agent node responding to latest proponent argument."""
     topic = state.get("topic", "")
+    curr_round = state.get("current_round", 0) + 1
+    round_topic = f"{topic} [Debate Round {curr_round}]"
     errors = list(state.get("errors", []))
     prop_hist = state.get("proponent_history", [])
 
@@ -58,7 +62,7 @@ async def opponent_node(
     try:
         latest_prop = ArgumentOutput.model_validate(prop_hist[-1])
         agent = OpponentAgent(llm_provider=llm_provider)
-        res = await agent.construct_rebuttal(topic, proponent_argument=latest_prop)
+        res = await agent.construct_rebuttal(round_topic, proponent_argument=latest_prop)
         rebuttal_dict = res.data.model_dump()
 
         opp_hist = list(state.get("opponent_history", []))
@@ -81,8 +85,11 @@ async def evidence_node(
 ) -> dict[str, Any]:
     """Execute Evidence Verification node auditing claims against Qdrant vector store."""
     topic = state.get("topic", "")
+    curr_round = state.get("current_round", 0) + 1
+    round_topic = f"{topic} [Debate Round {curr_round}]"
     errors = list(state.get("errors", []))
     prop_hist = state.get("proponent_history", [])
+
 
     if not prop_hist:
         errors.append("evidence_node failure: missing proponent_history")
@@ -98,8 +105,11 @@ async def evidence_node(
 
         agent = EvidenceAgent(llm_provider=llm_provider)
         res = await agent.verify_evidence(
-            topic=topic, claim=latest_prop.claim, retrieved_context=context_text
+            topic=round_topic,
+            claim=latest_prop.claim,
+            retrieved_context=context_text,
         )
+
         ev_dict = res.data.model_dump()
 
         ev_hist = list(state.get("evidence_history", []))
@@ -121,6 +131,8 @@ async def critic_node(
 ) -> dict[str, Any]:
     """Execute position-neutral Critic agent node evaluating proponent & opponent cases."""
     topic = state.get("topic", "")
+    curr_round = state.get("current_round", 0) + 1
+    round_topic = f"{topic} [Debate Round {curr_round}]"
     errors = list(state.get("errors", []))
     prop_hist = state.get("proponent_history", [])
     opp_hist = state.get("opponent_history", [])
@@ -135,7 +147,7 @@ async def critic_node(
 
         agent = CriticAgent(llm_provider=llm_provider)
         res = await agent.evaluate_debate(
-            topic, proponent_argument=latest_prop, opponent_rebuttal=latest_opp
+            round_topic, proponent_argument=latest_prop, opponent_rebuttal=latest_opp
         )
         critic_dict = res.data.model_dump()
 
@@ -158,6 +170,8 @@ async def judge_node(
 ) -> dict[str, Any]:
     """Execute blind Judge agent node scoring debate against 5-dimension rubric."""
     topic = state.get("topic", "")
+    curr_round = state.get("current_round", 0) + 1
+    round_topic = f"{topic} [Debate Round {curr_round}]"
     errors = list(state.get("errors", []))
     prop_hist = state.get("proponent_history", [])
     opp_hist = state.get("opponent_history", [])
@@ -170,8 +184,6 @@ async def judge_node(
     try:
         latest_prop = ArgumentOutput.model_validate(prop_hist[-1])
         latest_opp = RebuttalOutput.model_validate(opp_hist[-1])
-        from app.llm.schemas import CriticOutput
-
         latest_crit = CriticOutput.model_validate(crit_hist[-1])
 
         position_a_text = (
@@ -187,7 +199,7 @@ async def judge_node(
 
         agent = JudgeAgent(llm_provider=llm_provider)
         res = await agent.judge_debate(
-            topic=topic,
+            topic=round_topic,
             position_a_arg=position_a_text,
             position_b_arg=position_b_text,
             critic_evaluation=latest_crit,
@@ -196,7 +208,6 @@ async def judge_node(
 
         jdg_hist = list(state.get("judge_history", []))
         jdg_hist.append(judge_dict)
-        curr_round = state.get("current_round", 0) + 1
 
         return {
             "judge_history": jdg_hist,

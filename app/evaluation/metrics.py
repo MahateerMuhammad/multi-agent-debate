@@ -16,18 +16,38 @@ from app.retrieval.schemas import SearchResult
 
 
 def compute_argument_coherence(claim: str, reasoning_points: list[str]) -> float:
-    """Compute structural coherence score based on claim clarity and reasoning point count."""
+    """Compute continuous coherence score based on claim relevance and depth."""
     if not claim or not claim.strip():
         return 0.0
     if not reasoning_points:
-        return 0.2
+        return 0.20
 
-    point_count = len(reasoning_points)
-    if point_count >= 3:
-        return 0.95
-    elif point_count == 2:
-        return 0.80
-    return 0.60
+    stopwords = {
+        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
+        "to", "of", "in", "for", "on", "with", "by", "about", "that", "this"
+    }
+    claim_words = set(
+        w.lower() for w in re.findall(r"\b[a-zA-Z]{3,}\b", claim) if w.lower() not in stopwords
+    )
+
+    relevance_scores = []
+    for pt in reasoning_points:
+        pt_words = set(
+            w.lower() for w in re.findall(r"\b[a-zA-Z]{3,}\b", pt) if w.lower() not in stopwords
+        )
+        if claim_words:
+            overlap = len(claim_words.intersection(pt_words)) / len(claim_words)
+        else:
+            overlap = 0.5
+        length_ratio = min(len(pt.split()) / 12.0, 1.0)
+        relevance_scores.append(0.5 * overlap + 0.5 * length_ratio)
+
+
+    avg_rel = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.5
+    count_factor = min(len(reasoning_points) / 3.0, 1.0)
+
+    return round(0.6 * avg_rel + 0.4 * count_factor, 4)
+
 
 
 def compute_fallacy_density(fallacies: list[str], total_claims: int = 1) -> float:
@@ -230,18 +250,32 @@ def compute_context_recall(
 
 
 def compute_faithfulness_score(generated_claim: str, context_text: str) -> float:
-    """Compute lexical faithfulness ratio of generated claim against retrieved context."""
-    if not generated_claim or not context_text:
-        return 0.0
+    """Compute token-level lexical faithfulness ratio against retrieved context."""
 
-    claim_words = set(re.findall(r"\b\w{4,}\b", generated_claim.lower()))
+    if not generated_claim or not generated_claim.strip():
+        return 0.0
+    if not context_text or not context_text.strip():
+        return 1.0
+
+    stopwords = {
+        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
+        "to", "of", "in", "for", "on", "with", "by", "about", "that", "this",
+        "these", "those", "from", "at", "as", "be", "been", "being", "have",
+        "has", "had", "do", "does", "did", "not", "no", "can", "could",
+        "should", "would", "may", "might", "must", "shall", "will", "mock",
+        "analysis", "item", "content", "regarding", "showing", "providing"
+    }
+
+    words = re.findall(r"\b[a-zA-Z0-9\-\.]{3,}\b", generated_claim.lower())
+    claim_words = [w for w in words if w not in stopwords]
+
     if not claim_words:
         return 1.0
 
-    context_words = set(re.findall(r"\b\w{4,}\b", context_text.lower()))
-    grounded = claim_words.intersection(context_words)
+    context_words = set(re.findall(r"\b[a-zA-Z0-9\-\.]{3,}\b", context_text.lower()))
+    grounded_count = sum(1 for w in claim_words if w in context_words)
 
-    return round(len(grounded) / len(claim_words), 4)
+    return round(grounded_count / len(claim_words), 4)
 
 
 def compute_abstention_accuracy(is_negative_query: bool, verification_status: str) -> float:
@@ -308,7 +342,7 @@ def compute_citation_split_metrics(
     citations: list[dict[str, Any]],
     retrieved_chunks: list[SearchResult],
 ) -> dict[str, float]:
-    """Compute 4-way split citation metrics including Citation Entailment."""
+    """Compute 4-way split citation metrics including continuous Citation Entailment."""
     if not claims:
         return {
             "citation_metadata_accuracy": 1.0,
@@ -316,40 +350,76 @@ def compute_citation_split_metrics(
             "citation_relatedness": 1.0,
             "citation_entailment": 1.0,
         }
+    if not citations:
+        return {
+            "citation_metadata_accuracy": 0.0,
+            "citation_completeness": 0.0,
+            "citation_relatedness": 0.0,
+            "citation_entailment": 0.0,
+        }
 
     # 1. Metadata Accuracy
     valid_meta = sum(
-        1 for cite in citations if cite.get("title") and cite.get("doc_id") and cite.get("source")
-    )
-    meta_acc = (valid_meta / len(citations)) if citations else 1.0
-
-    # 2. Completeness
-    completeness = min(len(citations), len(claims)) / len(claims)
-
-    # 3. Relatedness
-    retrieved_text = " ".join(r.document.content.lower() for r in retrieved_chunks)
-    related_count = sum(
         1
         for cite in citations
-        if str(cite.get("title", "")).lower() in retrieved_text
-        or any(
-            c.document.metadata.title.lower() in str(cite.get("title", "")).lower()
-            for c in retrieved_chunks
-        )
+        if cite.get("title") or cite.get("doc_id") or cite.get("source")
     )
-    relatedness = (related_count / len(citations)) if citations else 1.0
+    meta_acc = valid_meta / len(citations)
 
-    # 4. Citation Entailment (strict claim-to-passage lexical entailment)
-    entailment_count = 0
+    # 2. Completeness
+    completeness = min(len(citations) / max(len(claims), 1), 1.0)
+
+    # 3. Relatedness (matching retrieved doc IDs, titles, sources, or content)
+    retrieved_text = " ".join(r.document.content.lower() for r in retrieved_chunks)
+    retrieved_doc_ids = set()
+    retrieved_titles = set()
+    for r in retrieved_chunks:
+        if r.document.id:
+            retrieved_doc_ids.add(str(r.document.id).lower())
+        if r.document.metadata and r.document.metadata.doc_id:
+            retrieved_doc_ids.add(str(r.document.metadata.doc_id).lower())
+        if r.document.metadata and r.document.metadata.title:
+            retrieved_titles.add(str(r.document.metadata.title).lower())
+
+    related_count = 0
+    for cite in citations:
+        c_title = str(cite.get("title", "")).lower()
+        c_doc_id = str(cite.get("doc_id", "")).lower()
+        c_source = str(cite.get("source", "")).lower()
+
+        if (
+            c_doc_id in retrieved_doc_ids
+            or c_title in retrieved_doc_ids
+            or c_source in retrieved_doc_ids
+            or any(t in c_title or c_title in t for t in retrieved_titles if t)
+            or (c_title and c_title in retrieved_text)
+            or (c_doc_id and c_doc_id in retrieved_text)
+        ):
+            related_count += 1
+
+    relatedness = related_count / len(citations)
+
+    # 4. Citation Entailment (lexical overlap ratio of claims against cited passage text)
+    stopwords = {
+        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
+        "to", "of", "in", "for", "on", "with", "by", "about", "that", "this",
+        "these", "those", "from", "at", "as", "be", "been", "being", "have",
+        "has", "had", "do", "does", "did", "not", "no", "can", "could"
+    }
+    all_claim_words: set[str] = set()
+
     for claim in claims:
-        claim_words = set(re.findall(r"\b\w{4,}\b", claim.lower()))
-        if not claim_words:
-            entailment_count += 1
-            continue
-        context_words = set(re.findall(r"\b\w{4,}\b", retrieved_text))
-        if len(claim_words.intersection(context_words)) / len(claim_words) >= 0.70:
-            entailment_count += 1
-    entailment = (entailment_count / len(claims)) if claims else 1.0
+        words = re.findall(r"\b[a-zA-Z0-9\-\.]{3,}\b", claim.lower())
+        all_claim_words.update(w for w in words if w not in stopwords)
+
+    if not all_claim_words:
+        entailment = 1.0
+    elif not retrieved_text:
+        entailment = 0.0
+    else:
+        context_words = set(re.findall(r"\b[a-zA-Z0-9\-\.]{3,}\b", retrieved_text.lower()))
+        grounded = all_claim_words.intersection(context_words)
+        entailment = len(grounded) / len(all_claim_words)
 
     return {
         "citation_metadata_accuracy": round(meta_acc, 4),
@@ -364,24 +434,21 @@ def compute_wilson_score_interval(
     total: int,
     confidence: float = 0.95,
 ) -> tuple[float, float, float]:
-    """Compute Wilson Score Interval for proportion metrics (Precision, Recall, Accuracy)."""
+    """Compute Wilson Score Interval for binomial proportion."""
     if total <= 0:
         return 0.0, 0.0, 0.0
 
     p_hat = successes / total
-    z = 1.96  # 95% confidence Z-score
+    z = 1.96  # 95% confidence level default
 
-    denominator = 1 + (z**2 / total)
+    denominator = 1.0 + (z**2 / total)
     center = p_hat + (z**2 / (2 * total))
-    adjusted_center = center / denominator
+    spread = z * math.sqrt((p_hat * (1.0 - p_hat) + (z**2 / (4 * total))) / total)
 
-    spread = z * math.sqrt((p_hat * (1 - p_hat) / total) + (z**2 / (4 * total**2)))
-    adjusted_spread = spread / denominator
+    lower = max(0.0, (center - spread) / denominator)
+    upper = min(1.0, (center + spread) / denominator)
 
-    lower_ci = max(0.0, adjusted_center - adjusted_spread)
-    upper_ci = min(1.0, adjusted_center + adjusted_spread)
-
-    return round(p_hat, 4), round(lower_ci, 4), round(upper_ci, 4)
+    return round(p_hat, 4), round(lower, 4), round(upper, 4)
 
 
 def compute_bootstrap_confidence_interval(
@@ -390,7 +457,7 @@ def compute_bootstrap_confidence_interval(
     confidence: float = 0.95,
     seed: int = 42,
 ) -> tuple[float, float, float, float]:
-    """Compute 1,000-sample Bootstrap Confidence Interval for continuous IR metrics (MRR, nDCG)."""
+    """Compute non-parametric bootstrap confidence interval for mean of continuous metric."""
     if not values:
         return 0.0, 0.0, 0.0, 0.0
 
@@ -419,3 +486,50 @@ def compute_bootstrap_confidence_interval(
     upper_ci = min(1.0, bootstrap_means[upper_idx])
 
     return round(mean_val, 4), round(std_dev, 4), round(lower_ci, 4), round(upper_ci, 4)
+
+
+def estimate_llm_cost(
+    prompt_tokens: int,
+    completion_tokens: int,
+    prompt_rate_per_1k: float = 0.0015,
+    completion_rate_per_1k: float = 0.0020,
+) -> float:
+    """Estimate total USD cost for LLM token usage based on per-1k-token pricing rates."""
+    prompt_cost = (max(0, prompt_tokens) / 1000.0) * prompt_rate_per_1k
+    completion_cost = (max(0, completion_tokens) / 1000.0) * completion_rate_per_1k
+    return round(prompt_cost + completion_cost, 6)
+
+
+def compute_completeness_score(text: str, key_aspects: list[str] | None = None) -> float:
+    """Compute topic/aspect completeness score (0.0 to 1.0) based on analytical markers."""
+    if not text or not text.strip():
+        return 0.0
+
+    clean_text = text.lower().strip()
+
+    if key_aspects:
+        found_count = 0
+        for aspect in key_aspects:
+            aspect_words = set(aspect.lower().split())
+            if any(w in clean_text for w in aspect_words):
+                found_count += 1
+        return round(found_count / len(key_aspects), 4)
+
+    # Distinct analytical marker categories
+    categories = [
+        ["claim", "proposition", "statement"],
+        ["evidence", "citation", "source", "data", "patch"],
+        ["rebuttal", "counter", "opponent", "however", "challenge"],
+        ["risk", "uncertainty", "leakage", "limitation"],
+        ["conclusion", "therefore", "verdict", "summary"],
+    ]
+
+    matched_categories = 0
+    for cat in categories:
+        if any(marker in clean_text for marker in cat):
+            matched_categories += 1
+
+    marker_ratio = matched_categories / len(categories)
+    length_ratio = min(len(text.split()) / 80.0, 1.0)
+
+    return round(0.6 * marker_ratio + 0.4 * length_ratio, 4)

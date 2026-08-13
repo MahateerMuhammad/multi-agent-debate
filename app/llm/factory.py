@@ -10,10 +10,13 @@ from app.llm.providers.mock import MockLLMProvider
 from app.llm.providers.qwen_provider import QwenProvider
 
 
-def get_llm_provider(config: Settings | None = None) -> BaseLLMProvider:
+def get_llm_provider(
+    config: Settings | None = None, provider_name: str | None = None
+) -> BaseLLMProvider:
     """Factory function instantiating the configured LLM provider instance."""
     cfg = config or default_settings
-    provider_type = cfg.LLM_PROVIDER.lower()
+    provider_type = (provider_name or cfg.LLM_PROVIDER).lower()
+
 
     if provider_type in ("openrouter", "qwen", "ollama", "vllm", "openai-compatible"):
         if not cfg.LLM_BASE_URL:

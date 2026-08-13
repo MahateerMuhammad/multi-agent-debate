@@ -28,12 +28,20 @@ from app.retrieval.vectorstore import QdrantVectorStore
 
 
 def test_compute_argument_coherence() -> None:
-    """Test argument coherence scoring."""
+    """Test continuous argument coherence scoring."""
     assert compute_argument_coherence("", []) == 0.0
     assert compute_argument_coherence("Claim A", []) == 0.2
-    assert compute_argument_coherence("Claim A", ["Point 1"]) == 0.60
-    assert compute_argument_coherence("Claim A", ["Point 1", "Point 2"]) == 0.80
-    assert compute_argument_coherence("Claim A", ["Point 1", "Point 2", "Point 3"]) == 0.95
+    c1 = compute_argument_coherence(
+        "Claim A about artificial intelligence",
+        ["Point 1 regarding artificial intelligence"],
+    )
+    c2 = compute_argument_coherence(
+        "Claim A about artificial intelligence",
+        ["Point 1 regarding artificial intelligence", "Point 2 explaining intelligence"],
+    )
+    assert 0.0 < c1 < c2 <= 1.0
+
+
 
 
 def test_compute_fallacy_density() -> None:

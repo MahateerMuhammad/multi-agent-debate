@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from app.graph.schemas import StopReason
+
 
 class DebateState(TypedDict, total=False):
     """Typed state dictionary passed through the LangGraph debate workflow."""
@@ -19,7 +21,9 @@ class DebateState(TypedDict, total=False):
     critic_history: list[dict[str, Any]]
     judge_history: list[dict[str, Any]]
     is_finished: bool
-    stop_reason: str
+    stop_reason: StopReason
     total_latency: float
+    prompt_tokens: int
+    completion_tokens: int
     total_tokens: int
     errors: list[str]

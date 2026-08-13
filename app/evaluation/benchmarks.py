@@ -7,9 +7,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.evaluation.metrics import (
-    compute_argument_coherence,
     compute_fallacy_density,
     compute_rag_f1_score,
+    compute_reasoning_lexical_alignment,
 )
 from app.graph.workflow import build_debate_graph
 from app.llm.base import BaseLLMProvider
@@ -106,7 +106,7 @@ async def run_benchmark_evaluations(
 
         if prop_hist:
             latest_prop = prop_hist[-1]
-            coherence = compute_argument_coherence(
+            coherence = compute_reasoning_lexical_alignment(
                 latest_prop.get("claim", ""), latest_prop.get("reasoning", [])
             )
         else:

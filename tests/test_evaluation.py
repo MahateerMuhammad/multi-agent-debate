@@ -6,7 +6,6 @@ from app.evaluation.ablation import run_candidate_pooling_matrix, run_component_
 from app.evaluation.benchmarks import run_benchmark_evaluations
 from app.evaluation.dataset import DEV_SET, UNSEEN_TEST_SET, load_and_index_corpus
 from app.evaluation.metrics import (
-    compute_argument_coherence,
     compute_bootstrap_confidence_interval,
     compute_citation_split_metrics,
     compute_confusion_matrix_and_accuracy,
@@ -15,10 +14,12 @@ from app.evaluation.metrics import (
     compute_mrr,
     compute_ndcg_at_k,
     compute_precision_at_k,
+    compute_reasoning_lexical_alignment,
     compute_rebuttal_directness,
     compute_recall_at_k,
     compute_rubric_composite_score,
     compute_wilson_score_interval,
+    estimate_llm_cost,
 )
 from app.llm.providers.mock import MockLLMProvider
 from app.llm.schemas import RubricDimensionScore
@@ -27,19 +28,52 @@ from app.retrieval.schemas import Document, DocumentMetadata, SearchResult
 from app.retrieval.vectorstore import QdrantVectorStore
 
 
-def test_compute_argument_coherence() -> None:
-    """Test continuous argument coherence scoring."""
-    assert compute_argument_coherence("", []) == 0.0
-    assert compute_argument_coherence("Claim A", []) == 0.2
-    c1 = compute_argument_coherence(
-        "Claim A about artificial intelligence",
-        ["Point 1 regarding artificial intelligence"],
+def test_metric_cost_and_completeness_calculation() -> None:
+    """Test LLM cost estimation based on separated prompt/completion tokens."""
+    # 100 prompt, 50 completion
+    cost_both = estimate_llm_cost(
+        prompt_tokens=100,
+        completion_tokens=50,
+        prompt_rate_per_1k=0.0015,
+        completion_rate_per_1k=0.0020
     )
-    c2 = compute_argument_coherence(
-        "Claim A about artificial intelligence",
-        ["Point 1 regarding artificial intelligence", "Point 2 explaining intelligence"],
+    assert cost_both == pytest.approx((100 / 1000.0) * 0.0015 + (50 / 1000.0) * 0.0020)
+
+    # Prompt only
+    cost_prompt = estimate_llm_cost(100, 0, 0.0015, 0.0020)
+    assert cost_prompt == pytest.approx((100 / 1000.0) * 0.0015)
+
+    # Completion only
+    cost_comp = estimate_llm_cost(0, 50, 0.0015, 0.0020)
+    assert cost_comp == pytest.approx((50 / 1000.0) * 0.0020)
+
+    # Both zero
+    total_zero = estimate_llm_cost(0, 0)
+    assert total_zero == pytest.approx(0.0)
+
+
+def test_compute_reasoning_lexical_alignment() -> None:
+    # Example 1: Claim and reasoning strongly overlap. Expected: high lexical alignment.
+    high_align = compute_reasoning_lexical_alignment(
+        "Open source models improve security significantly through decentralization",
+        ["Open source models improve security significantly by allowing decentralized code audits."]
     )
-    assert 0.0 < c1 < c2 <= 1.0
+    assert high_align >= 0.60
+
+    # Example 2: Claim and reasoning have little lexical overlap. Expected: low lexical alignment.
+    low_align = compute_reasoning_lexical_alignment(
+        "The project needs more funding.",
+        ["Apples are usually red or green and grow on trees in orchards."]
+    )
+    assert low_align <= 0.45
+
+    # Example 3: Semantically good reasoning with low lexical overlap. Expected: metric scores low.
+    semantic_good_low_align = compute_reasoning_lexical_alignment(
+        "Automobiles contribute heavily to atmospheric warming.",
+        ["Internal combustion engines release massive volumes of greenhouse gases daily."]
+    )
+    assert semantic_good_low_align <= 0.65
+    assert semantic_good_low_align < high_align
 
 
 

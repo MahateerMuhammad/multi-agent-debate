@@ -177,3 +177,23 @@ async def test_structured_schemas_instantiation() -> None:
     )
     assert judge.winner == "Position A"
     assert judge.total_score_a > judge.total_score_b
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_dynamic_output() -> None:
+    """Test that mock provider output varies with prompt and round."""
+    provider = MockLLMProvider()
+
+    # Different rounds produce different JSON structure text
+    res1 = await provider.generate_structured("Round 1 Query", ArgumentOutput)
+    res2 = await provider.generate_structured("Round 2 Query", ArgumentOutput)
+
+    # Output text should differ based on round
+    assert "Round 1" in res1.data.claim
+    assert "Round 2" in res2.data.claim
+    assert res1.data.claim != res2.data.claim
+
+    # Different topics produce different text
+    res_legal = await provider.generate_structured("Round 1 Traffic court", ArgumentOutput)
+    assert "court" in res_legal.data.claim.lower() or "judicial" in res_legal.data.claim.lower()
+    assert res1.data.claim != res_legal.data.claim

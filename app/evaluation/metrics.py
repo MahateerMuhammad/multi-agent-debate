@@ -15,8 +15,8 @@ from app.llm.schemas import RubricDimensionScore
 from app.retrieval.schemas import SearchResult
 
 
-def compute_argument_coherence(claim: str, reasoning_points: list[str]) -> float:
-    """Compute continuous coherence score based on claim relevance and depth."""
+def compute_reasoning_lexical_alignment(claim: str, reasoning_points: list[str]) -> float:
+    """Compute lexical alignment score based on claim overlap and structural length."""
     if not claim or not claim.strip():
         return 0.0
     if not reasoning_points:

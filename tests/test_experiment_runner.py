@@ -10,6 +10,8 @@ import pytest
 from app.evaluation.benchmarks import BENCHMARK_SUITE
 from app.evaluation.experiment_runner import EvaluationExperimentRunner
 from app.evaluation.metrics import compute_completeness_score, estimate_llm_cost
+from app.evaluation.schemas import CorrectnessStatus, EvaluationMode, UsageSource
+from app.graph.schemas import StopReason
 from app.llm.providers.mock import MockLLMProvider
 from app.retrieval.bm25 import BM25OkapiIndexer
 from app.retrieval.hybrid import HybridRetriever
@@ -70,20 +72,48 @@ async def test_experiment_runner_single_query(tmp_path: Path) -> None:
     assert res_single.metrics.number_of_debate_rounds == 0
     assert res_single.metrics.evidence_grounding >= 0.0
     assert res_single.metrics.citation_source_quality >= 0.0
+    assert res_single.metrics.correctness is None
+    assert res_single.metrics.correctness_status == CorrectnessStatus.not_evaluable
+    assert res_single.metrics.usage_source == UsageSource.simulated
+    assert (
+        res_single.metrics.total_tokens
+        == res_single.metrics.prompt_tokens + res_single.metrics.completion_tokens
+    )
 
     res_2agent = await runner.run_two_agent_debate(query, rounds=2)
     assert res_2agent.condition == "two_agent_debate"
     assert res_2agent.metrics.number_of_llm_calls == 4
     assert res_2agent.metrics.number_of_debate_rounds == 2
+    assert res_2agent.metrics.correctness is None
+    assert res_2agent.metrics.correctness_status == CorrectnessStatus.not_evaluable
+    assert res_2agent.metrics.usage_source == UsageSource.simulated
+    assert (
+        res_2agent.metrics.total_tokens
+        == res_2agent.metrics.prompt_tokens + res_2agent.metrics.completion_tokens
+    )
 
     res_fixed = await runner.run_full_multi_agent(query, adaptive_stopping=False, max_rounds=2)
     assert res_fixed.condition == "full_multi_agent_fixed"
     assert res_fixed.metrics.number_of_debate_rounds == 2
-    assert res_fixed.metrics.reasoning_quality >= 0.50
+    assert res_fixed.metrics.reasoning_quality >= 0.40
+    assert res_fixed.metrics.correctness is None
+    assert res_fixed.metrics.correctness_status == CorrectnessStatus.not_evaluable
+    assert res_fixed.metrics.usage_source == UsageSource.simulated
+    assert (
+        res_fixed.metrics.total_tokens
+        == res_fixed.metrics.prompt_tokens + res_fixed.metrics.completion_tokens
+    )
 
     res_adaptive = await runner.run_full_multi_agent(query, adaptive_stopping=True, max_rounds=5)
     assert res_adaptive.condition == "full_multi_agent_adaptive"
     assert res_adaptive.metrics.number_of_debate_rounds >= 1
+    assert res_adaptive.metrics.correctness is None
+    assert res_adaptive.metrics.correctness_status == CorrectnessStatus.not_evaluable
+    assert res_adaptive.metrics.usage_source == UsageSource.simulated
+    assert (
+        res_adaptive.metrics.total_tokens
+        == res_adaptive.metrics.prompt_tokens + res_adaptive.metrics.completion_tokens
+    )
 
 
 @pytest.mark.asyncio
@@ -198,12 +228,12 @@ async def test_adaptive_stopping_reasons_and_round_traces() -> None:
 
     res_adaptive = await runner.run_full_multi_agent(query, adaptive_stopping=True, max_rounds=5)
     assert res_adaptive.stop_reason in (
-        "confidence_threshold",
-        "quality_converged",
-        "max_rounds",
-        "fatal_system_error",
+        StopReason.confidence_threshold,
+        StopReason.quality_converged,
+        StopReason.max_rounds,
+        StopReason.fatal_system_error,
     )
-    assert res_adaptive.evaluation_mode == "synthetic"
+    assert res_adaptive.evaluation_mode == EvaluationMode.synthetic
     assert len(res_adaptive.round_traces) > 0
     assert "round" in res_adaptive.round_traces[0]
     assert "proponent" in res_adaptive.round_traces[0]

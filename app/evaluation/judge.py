@@ -8,7 +8,6 @@ from app.evaluation.benchmarks import (
 )
 from app.evaluation.metrics import (
     compute_abstention_accuracy,
-    compute_argument_coherence,
     compute_context_precision,
     compute_context_recall,
     compute_faithfulness_score,
@@ -17,13 +16,14 @@ from app.evaluation.metrics import (
     compute_ndcg_at_k,
     compute_precision_at_k,
     compute_rag_f1_score,
+    compute_reasoning_lexical_alignment,
     compute_rebuttal_directness,
     compute_recall_at_k,
     compute_rubric_composite_score,
 )
 
 __all__ = [
-    "compute_argument_coherence",
+    "compute_reasoning_lexical_alignment",
     "compute_fallacy_density",
     "compute_rebuttal_directness",
     "compute_rubric_composite_score",

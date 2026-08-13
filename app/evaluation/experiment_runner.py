@@ -9,22 +9,24 @@ import time
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
 from app.agents.opponent import OpponentAgent
 from app.agents.proponent import ProponentAgent
 from app.evaluation.metrics import (
-    compute_argument_coherence,
     compute_citation_split_metrics,
     compute_completeness_score,
     compute_faithfulness_score,
     compute_fallacy_density,
+    compute_reasoning_lexical_alignment,
     compute_rebuttal_directness,
     compute_recall_at_k,
     estimate_llm_cost,
 )
+from app.evaluation.schemas import CorrectnessStatus, EvaluationMode, UsageSource
+from app.graph.schemas import StopReason
 from app.graph.workflow import build_debate_graph
 from app.llm.base import BaseLLMProvider
 from app.llm.factory import get_llm_provider
@@ -54,7 +56,13 @@ def get_system_metadata() -> dict[str, str]:
 class MetricResult(BaseModel):
     """Container for key metrics measured for a single query execution."""
 
-    correctness: float = Field(..., description="Ground-truth doc recall (0.0 - 1.0)")
+    correctness: Optional[float] = Field(default=None, description="Answer correctness (0.0 - 1.0)")  # noqa: UP045
+    correctness_status: CorrectnessStatus = Field(
+        ..., description="Evaluation status of correctness"
+    )
+    retrieval_recall: Optional[float] = Field(  # noqa: UP045
+        default=None, description="Ground-truth doc recall (0.0 - 1.0)"
+    )
     reasoning_lexical_alignment: float = Field(
         ..., description="Claim-to-reasoning lexical alignment & depth (0.0 - 1.0)"
     )
@@ -68,12 +76,16 @@ class MetricResult(BaseModel):
         ..., description="Analytical category coverage & length ratio (0.0 - 1.0)"
     )
     reported_confidence: float = Field(
-        ..., description="Model/Judge reported confidence rating (0.0 - 1.0)"
+        ..., description="Pure model/judge reported confidence rating (0.0 - 1.0), not calibrated."
+    )
+    evaluator_confidence_score: float = Field(
+        ..., description="Composite score of raw confidence and reasoning alignment."
     )
     latency_seconds: float = Field(..., description="Wall-clock time in seconds")
     prompt_tokens: int = Field(default=0, description="Input/prompt token count")
     completion_tokens: int = Field(default=0, description="Output/completion token count")
     total_tokens: int = Field(..., description="Total prompt + completion tokens")
+    usage_source: UsageSource = Field(..., description="Provenance of token usage")
     prompt_cost_usd: float = Field(default=0.0, description="Estimated prompt input cost in USD")
     completion_cost_usd: float = Field(
         default=0.0, description="Estimated completion output cost in USD"
@@ -102,9 +114,11 @@ class QueryConditionResult(BaseModel):
     metrics: MetricResult
     output_summary: str
     retrieved_doc_ids: list[str]
-    stop_reason: str = Field(default="max_rounds", description="Graph termination reason")
-    evaluation_mode: str = Field(
-        default="synthetic", description="'synthetic' (mock) or 'real_model'"
+    stop_reason: StopReason = Field(
+        default=StopReason.max_rounds, description="Graph termination reason"
+    )
+    evaluation_mode: EvaluationMode = Field(
+        default=EvaluationMode.synthetic, description="'synthetic' (mock) or 'real_model'"
     )
     round_traces: list[dict[str, Any]] = Field(
         default_factory=list, description="Per-round state execution trajectory"
@@ -119,7 +133,8 @@ class ConditionAggregatedSummary(BaseModel):
     sample_size: int
 
     # Means
-    mean_correctness: float
+    mean_correctness: Optional[float]  # noqa: UP045
+    std_correctness: Optional[float]  # noqa: UP045
     mean_reasoning_quality: float
     mean_evidence_grounding: float
     mean_citation_source_quality: float
@@ -131,11 +146,10 @@ class ConditionAggregatedSummary(BaseModel):
     total_cost_usd: float
     mean_llm_calls: float
     mean_debate_rounds: float
-    quality_per_cost_ratio: float = 0.0
+    correctness_per_dollar: float = 0.0
     adaptive_cost_savings_pct: float = 0.0
 
     # Within-condition standard deviations
-    std_correctness: float = 0.0
     std_reasoning_quality: float = 0.0
     std_evidence_grounding: float = 0.0
     std_citation_source_quality: float = 0.0
@@ -152,8 +166,8 @@ class FullExperimentReport(BaseModel):
     """Complete machine-readable experiment output."""
 
     timestamp: str
-    evaluation_mode: str = Field(
-        default="synthetic", description="'synthetic' (mock) or 'real_model'"
+    evaluation_mode: EvaluationMode = Field(
+        default=EvaluationMode.synthetic, description="'synthetic' (mock) or 'real_model'"
     )
     model_name: str
     dataset_name: str
@@ -179,7 +193,7 @@ class EvaluationExperimentRunner:
             llm_provider=self.llm_provider, vector_store=self.vector_store
         )
         self.is_mock = getattr(self.llm_provider, "provider_name", "").lower() == "mock"
-        self.eval_mode = "synthetic" if self.is_mock else "real_model"
+        self.eval_mode = EvaluationMode.synthetic if self.is_mock else EvaluationMode.real_model
 
     async def _retrieve_context(self, query: str) -> tuple[list[SearchResult], str, list[str]]:
         """Retrieve fresh evidence passages if retriever is available and deduplicate doc IDs."""
@@ -211,7 +225,6 @@ class EvaluationExperimentRunner:
             set(raw_expected) if isinstance(raw_expected, (set, list)) else set()
         )
 
-        is_neg = getattr(benchmark_query, "is_negative", False)
         q_id = getattr(benchmark_query, "id", "Q-UNKNOWN")
 
         results, context_str, retrieved_ids = await self._retrieve_context(query_text)
@@ -237,17 +250,17 @@ class EvaluationExperimentRunner:
             reasoning = [reasoning]
 
         full_output_text = f"{claim} {' '.join(reasoning)}"
-        reasoning_score = round(min(compute_argument_coherence(claim, reasoning), 0.70), 4)
+        reasoning_score = round(min(compute_reasoning_lexical_alignment(claim, reasoning), 0.70), 4)
         completeness = compute_completeness_score(full_output_text)
         grounding = compute_faithfulness_score(full_output_text, context_str)
 
         if expected_ids and retrieved_ids:
-            recall = compute_recall_at_k(results, expected_ids, k=len(results))
-            correctness = recall if recall is not None else 0.0
-        elif is_neg:
-            correctness = 1.0
+            retrieval_recall = compute_recall_at_k(results, expected_ids, k=len(results))
         else:
-            correctness = 0.8
+            retrieval_recall = None
+
+        correctness = None
+        correctness_status = CorrectnessStatus.not_evaluable
 
         citations = getattr(data, "supporting_evidence", [])
         if citations:
@@ -271,7 +284,8 @@ class EvaluationExperimentRunner:
         else:
             citation_quality = 1.0
 
-        confidence = round(0.70 + (reasoning_score * 0.20), 4)
+        reported_conf = float(getattr(data, "confidence", 1.0))
+        evaluator_conf = round(0.70 + (reasoning_score * 0.20), 4)
 
         prompt_toks = llm_resp.usage.prompt_tokens
         comp_toks = llm_resp.usage.completion_tokens
@@ -280,17 +294,27 @@ class EvaluationExperimentRunner:
         comp_cost = estimate_llm_cost(0, comp_toks)
         cost = prompt_cost + comp_cost
 
+        usage_source = (
+            UsageSource.simulated
+            if self.eval_mode == EvaluationMode.synthetic
+            else UsageSource.provider_reported
+        )
+
         metrics = MetricResult(
-            correctness=round(correctness, 4),
+            correctness=correctness,
+            correctness_status=correctness_status,
+            retrieval_recall=retrieval_recall,
             reasoning_lexical_alignment=reasoning_score,
             evidence_grounding=round(grounding, 4),
             citation_source_quality=round(citation_quality, 4),
             completeness=completeness,
-            reported_confidence=confidence,
+            reported_confidence=reported_conf,
+            evaluator_confidence_score=evaluator_conf,
             latency_seconds=latency,
             prompt_tokens=prompt_toks,
             completion_tokens=comp_toks,
             total_tokens=tok,
+            usage_source=usage_source,
             prompt_cost_usd=round(prompt_cost, 6),
             completion_cost_usd=round(comp_cost, 6),
             estimated_cost_usd=round(cost, 6),
@@ -305,7 +329,7 @@ class EvaluationExperimentRunner:
             metrics=metrics,
             output_summary=f"Direct LLM Response: {claim}",
             retrieved_doc_ids=retrieved_ids,
-            stop_reason="direct_execution",
+            stop_reason=StopReason.direct_execution,
             evaluation_mode=self.eval_mode,
             round_traces=[],
             raw_details={
@@ -327,7 +351,6 @@ class EvaluationExperimentRunner:
             set(raw_expected) if isinstance(raw_expected, (set, list)) else set()
         )
 
-        is_neg = getattr(benchmark_query, "is_negative", False)
         q_id = getattr(benchmark_query, "id", "Q-UNKNOWN")
 
         results, context_str, retrieved_ids = await self._retrieve_context(query_text)
@@ -387,7 +410,7 @@ class EvaluationExperimentRunner:
         reasoning = last_prop.reasoning
         counter_args = getattr(last_opp, "counter_arguments", [])
 
-        coh = compute_argument_coherence(claim, reasoning)
+        coh = compute_reasoning_lexical_alignment(claim, reasoning)
         directness = compute_rebuttal_directness(claim, counter_args) if counter_args else 0.8
         reasoning_score = round(max(0.0, 0.5 * coh + 0.5 * directness), 4)
 
@@ -396,12 +419,12 @@ class EvaluationExperimentRunner:
         grounding = compute_faithfulness_score(full_output_text, context_str)
 
         if expected_ids and retrieved_ids:
-            recall = compute_recall_at_k(results, expected_ids, k=len(results))
-            correctness = recall if recall is not None else 0.0
-        elif is_neg:
-            correctness = 1.0
+            retrieval_recall = compute_recall_at_k(results, expected_ids, k=len(results))
         else:
-            correctness = 0.85
+            retrieval_recall = None
+
+        correctness = None
+        correctness_status = CorrectnessStatus.not_evaluable
 
         citations = getattr(last_prop, "supporting_evidence", [])
         if citations:
@@ -425,23 +448,34 @@ class EvaluationExperimentRunner:
         else:
             citation_quality = 1.0
 
-        confidence = round(0.60 + (reasoning_score * 0.25), 4)
+        reported_conf = float(getattr(last_prop, "confidence", 1.0))
+        evaluator_conf = round(0.60 + (reasoning_score * 0.25), 4)
 
         p_cost = estimate_llm_cost(p_toks, 0)
         c_cost = estimate_llm_cost(0, c_toks)
         cost = p_cost + c_cost
 
+        usage_source = (
+            UsageSource.simulated
+            if self.eval_mode == EvaluationMode.synthetic
+            else UsageSource.provider_reported
+        )
+
         metrics = MetricResult(
-            correctness=round(correctness, 4),
+            correctness=correctness,
+            correctness_status=correctness_status,
+            retrieval_recall=retrieval_recall,
             reasoning_lexical_alignment=reasoning_score,
             evidence_grounding=round(grounding, 4),
             citation_source_quality=round(citation_quality, 4),
             completeness=completeness,
-            reported_confidence=confidence,
+            reported_confidence=reported_conf,
+            evaluator_confidence_score=evaluator_conf,
             latency_seconds=latency,
             prompt_tokens=p_toks,
             completion_tokens=c_toks,
             total_tokens=total_toks,
+            usage_source=usage_source,
             prompt_cost_usd=round(p_cost, 6),
             completion_cost_usd=round(c_cost, 6),
             estimated_cost_usd=round(cost, 6),
@@ -456,7 +490,7 @@ class EvaluationExperimentRunner:
             metrics=metrics,
             output_summary=f"Proponent Claim: {claim} | Opponent Rebuttals: {len(counter_args)}",
             retrieved_doc_ids=retrieved_ids,
-            stop_reason="max_rounds",
+            stop_reason=StopReason.max_rounds,
             evaluation_mode=self.eval_mode,
             round_traces=round_traces,
             raw_details={
@@ -478,7 +512,6 @@ class EvaluationExperimentRunner:
             set(raw_expected) if isinstance(raw_expected, (set, list)) else set()
         )
 
-        is_neg = getattr(benchmark_query, "is_negative", False)
         q_id = getattr(benchmark_query, "id", "Q-UNKNOWN")
 
         results, context_str, retrieved_ids = await self._retrieve_context(query_text)
@@ -513,23 +546,23 @@ class EvaluationExperimentRunner:
 
         # Audit stop reason
         if any("failure" in str(e).lower() for e in errors):
-            stop_reason = "fatal_system_error"
+            stop_reason = StopReason.fatal_system_error
         elif adaptive_stopping and len(jdg_hist) > 0:
             latest = jdg_hist[-1]
             max_s = max(latest.get("total_score_a", 0.0), latest.get("total_score_b", 0.0))
             if max_s >= conf_thresh:
-                stop_reason = "confidence_threshold"
+                stop_reason = StopReason.confidence_threshold
             elif len(jdg_hist) >= 2:
                 prev = jdg_hist[-2]
                 prev_s = max(prev.get("total_score_a", 0.0), prev.get("total_score_b", 0.0))
                 if (max_s - prev_s) < imp_thresh:
-                    stop_reason = "quality_converged"
+                    stop_reason = StopReason.quality_converged
                 else:
-                    stop_reason = "max_rounds"
+                    stop_reason = StopReason.max_rounds
             else:
-                stop_reason = "max_rounds"
+                stop_reason = StopReason.max_rounds
         else:
-            stop_reason = "max_rounds"
+            stop_reason = StopReason.max_rounds
 
         round_traces = []
         for r in range(rounds_run):
@@ -576,7 +609,7 @@ class EvaluationExperimentRunner:
         fallacies = latest_crit.get("logical_fallacies", [])
         judge_rationale = latest_jdg.get("verdict_summary", "")
 
-        coh = compute_argument_coherence(claim, reasoning)
+        coh = compute_reasoning_lexical_alignment(claim, reasoning)
         counter_args = latest_opp.get("counter_arguments", [])
         directness = compute_rebuttal_directness(claim, counter_args) if counter_args else 0.8
         f_density = compute_fallacy_density(fallacies)
@@ -594,12 +627,12 @@ class EvaluationExperimentRunner:
         grounding = compute_faithfulness_score(full_output_text, context_str)
 
         if expected_ids and retrieved_ids:
-            recall = compute_recall_at_k(results, expected_ids, k=len(results))
-            correctness = recall if recall is not None else 0.0
-        elif is_neg:
-            correctness = 1.0 if latest_jdg.get("winner") != "Proponent" else 0.0
+            retrieval_recall = compute_recall_at_k(results, expected_ids, k=len(results))
         else:
-            correctness = 0.88
+            retrieval_recall = None
+
+        correctness = None
+        correctness_status = CorrectnessStatus.not_evaluable
 
         sources_cited = ev_hist[-1].get("sources_cited", []) if ev_hist else []
         if not sources_cited:
@@ -626,15 +659,22 @@ class EvaluationExperimentRunner:
         else:
             citation_quality = 1.0
 
-        raw_conf = float(latest_jdg.get("total_score_a", 0.85))
-        confidence = round(0.5 * raw_conf + 0.5 * reasoning_score, 4)
+        reported_conf = float(latest_prop.get("confidence", 1.0))
+        jdg_conf = float(latest_jdg.get("total_score_a", 0.85))
+        evaluator_conf = round(0.5 * jdg_conf + 0.5 * reasoning_score, 4)
 
-        tok = final_state.get("total_tokens", rounds_run * 1200)
-        p_toks = int(tok * 0.75)
-        c_toks = tok - p_toks
+        p_toks = final_state.get("prompt_tokens", 0)
+        c_toks = final_state.get("completion_tokens", 0)
+        tok = final_state.get("total_tokens", p_toks + c_toks)
         p_cost = estimate_llm_cost(p_toks, 0)
         c_cost = estimate_llm_cost(0, c_toks)
         cost = p_cost + c_cost
+
+        usage_source = (
+            UsageSource.simulated
+            if self.eval_mode == EvaluationMode.synthetic
+            else UsageSource.provider_reported
+        )
 
         llm_calls = rounds_run * 5
         cond_name = (
@@ -642,16 +682,20 @@ class EvaluationExperimentRunner:
         )
 
         metrics = MetricResult(
-            correctness=round(correctness, 4),
+            correctness=correctness,
+            correctness_status=correctness_status,
+            retrieval_recall=retrieval_recall,
             reasoning_lexical_alignment=reasoning_score,
             evidence_grounding=round(grounding, 4),
             citation_source_quality=round(citation_quality, 4),
             completeness=completeness,
-            reported_confidence=confidence,
+            reported_confidence=reported_conf,
+            evaluator_confidence_score=evaluator_conf,
             latency_seconds=latency,
             prompt_tokens=p_toks,
             completion_tokens=c_toks,
             total_tokens=tok,
+            usage_source=usage_source,
             prompt_cost_usd=round(p_cost, 6),
             completion_cost_usd=round(c_cost, 6),
             estimated_cost_usd=round(cost, 6),
@@ -722,7 +766,7 @@ class EvaluationExperimentRunner:
             if n == 0:
                 continue
 
-            correctness_vals = [m.correctness for m in metrics_list]
+            correctness_vals = [m.correctness for m in metrics_list if m.correctness is not None]
             reasoning_vals = [m.reasoning_lexical_alignment for m in metrics_list]
             grounding_vals = [m.evidence_grounding for m in metrics_list]
             citation_vals = [m.citation_source_quality for m in metrics_list]
@@ -734,13 +778,14 @@ class EvaluationExperimentRunner:
             calls_vals = [float(m.number_of_llm_calls) for m in metrics_list]
             rounds_vals = [float(m.number_of_debate_rounds) for m in metrics_list]
 
-            mean_corr = sum(correctness_vals) / n
+            mean_corr = sum(correctness_vals) / len(correctness_vals) if correctness_vals else None
             mean_reas = sum(reasoning_vals) / n
             mean_grnd = sum(grounding_vals) / n
             mean_cost = sum(cost_vals) / n
 
-            q_per_cost = (
-                round((mean_corr + mean_reas + mean_grnd) / (3.0 * max(mean_cost, 0.000001)), 2)
+            corr_per_dollar = (
+                round(mean_corr / max(mean_cost, 0.000001), 2)
+                if mean_corr is not None else 0.0
             )
 
             if cond_name == "full_multi_agent_fixed":
@@ -754,7 +799,7 @@ class EvaluationExperimentRunner:
             summary = ConditionAggregatedSummary(
                 condition_name=cond_name,
                 sample_size=n,
-                mean_correctness=round(mean_corr, 4),
+                mean_correctness=round(mean_corr, 4) if mean_corr is not None else None,
                 mean_reasoning_quality=round(mean_reas, 4),
                 mean_evidence_grounding=round(mean_grnd, 4),
                 mean_citation_source_quality=round(sum(citation_vals) / n, 4),
@@ -766,9 +811,9 @@ class EvaluationExperimentRunner:
                 total_cost_usd=round(sum(cost_vals), 6),
                 mean_llm_calls=round(sum(calls_vals) / n, 2),
                 mean_debate_rounds=round(sum(rounds_vals) / n, 2),
-                quality_per_cost_ratio=q_per_cost,
+                correctness_per_dollar=corr_per_dollar,
                 adaptive_cost_savings_pct=savings_pct,
-                std_correctness=_stddev(correctness_vals),
+                std_correctness=_stddev(correctness_vals) if len(correctness_vals) > 0 else None,
                 std_reasoning_quality=_stddev(reasoning_vals),
                 std_evidence_grounding=_stddev(grounding_vals),
                 std_citation_source_quality=_stddev(citation_vals),
@@ -817,7 +862,7 @@ class EvaluationExperimentRunner:
         """Format an aggregated report into a structured Markdown document."""
         lines = ["# Phase 7 Evaluation Framework Report", ""]
 
-        if report.evaluation_mode == "synthetic":
+        if report.evaluation_mode == EvaluationMode.synthetic:
             lines.extend(
                 [
                     "> [!WARNING]",
@@ -849,7 +894,7 @@ class EvaluationExperimentRunner:
                 "50-query benchmark suite before drawing final statistical conclusions.",
                 "",
                 f"- **Timestamp**: `{report.timestamp}`",
-                f"- **Evaluation Mode**: `{report.evaluation_mode.upper()}`",
+                f"- **Evaluation Mode**: `{report.evaluation_mode.value.upper()}`",
                 f"- **Model**: `{report.model_name}`",
                 f"- **Dataset**: `{report.dataset_name}` ({report.query_count} queries)",
                 f"- **Python / System**: `{py_v}` on `{plat}`",
@@ -864,8 +909,9 @@ class EvaluationExperimentRunner:
         )
 
         for cond, s in report.condition_summaries.items():
+            corr_str = f"{s.mean_correctness:.4f}" if s.mean_correctness is not None else "N/A"
             lines.append(
-                f"| `{cond}` | {s.mean_correctness:.4f} | {s.mean_reasoning_quality:.4f} | "
+                f"| `{cond}` | {corr_str} | {s.mean_reasoning_quality:.4f} | "
                 f"{s.mean_evidence_grounding:.4f} | {s.mean_citation_source_quality:.4f} | "
                 f"{s.mean_completeness:.4f} | {s.mean_confidence:.4f} | "
                 f"{s.mean_latency_seconds:.2f}s | {s.mean_total_tokens:.1f} | "
@@ -879,7 +925,7 @@ class EvaluationExperimentRunner:
                 "## Cost-Quality Efficiency & Resource Trade-Off Analysis",
                 "",
                 "| Condition | Mean Correctness | Reasoning Align | Total Cost ($) | "
-                "Quality / $ Ratio | Adaptive Savings |",
+                "Correctness / $ | Adaptive Savings |",
                 "| :--- | :---: | :---: | :---: | :---: | :---: |",
             ]
         )
@@ -889,9 +935,10 @@ class EvaluationExperimentRunner:
                 if cond == "full_multi_agent_adaptive"
                 else "Baseline"
             )
+            corr_str = f"{s.mean_correctness:.4f}" if s.mean_correctness is not None else "N/A"
             lines.append(
-                f"| `{cond}` | {s.mean_correctness:.4f} | {s.mean_reasoning_quality:.4f} | "
-                f"${s.total_cost_usd:.6f} | {s.quality_per_cost_ratio:,.1f} | {savings_str} |"
+                f"| `{cond}` | {corr_str} | {s.mean_reasoning_quality:.4f} | "
+                f"${s.total_cost_usd:.6f} | {s.correctness_per_dollar:,.1f} | {savings_str} |"
             )
 
         lines.extend(
@@ -905,8 +952,9 @@ class EvaluationExperimentRunner:
             ]
         )
         for cond, s in report.condition_summaries.items():
+            std_corr_str = f"{s.std_correctness:.4f}" if s.std_correctness is not None else "N/A"
             lines.append(
-                f"| `{cond}` | {s.std_correctness:.4f} | {s.std_reasoning_quality:.4f} | "
+                f"| `{cond}` | {std_corr_str} | {s.std_reasoning_quality:.4f} | "
                 f"{s.std_evidence_grounding:.4f} | {s.std_citation_source_quality:.4f} | "
                 f"{s.std_completeness:.4f} | {s.std_confidence:.4f} | "
                 f"{s.std_latency_seconds:.3f}s | {s.std_total_tokens:.1f} |"
@@ -925,11 +973,12 @@ class EvaluationExperimentRunner:
         )
         for res in report.detailed_query_results:
             m = res.metrics
+            corr_str = f"{m.correctness:.4f}" if m.correctness is not None else "N/A"
             lines.append(
-                f"| `{res.query_id}` | `{res.condition}` | {m.correctness:.4f} | "
+                f"| `{res.query_id}` | `{res.condition}` | {corr_str} | "
                 f"{m.reasoning_lexical_alignment:.4f} | {m.evidence_grounding:.4f} | "
                 f"{m.citation_source_quality:.4f} | {m.completeness:.4f} | "
-                f"{m.reported_confidence:.4f} | `{res.stop_reason}` | "
+                f"{m.reported_confidence:.4f} | `{res.stop_reason.value}` | "
                 f"{m.latency_seconds:.2f}s | {m.total_tokens} |"
             )
 

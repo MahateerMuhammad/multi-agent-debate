@@ -163,3 +163,41 @@ async def test_langgraph_end_to_end_execution() -> None:
     assert len(final_state["critic_history"]) > 0
     assert len(final_state["judge_history"]) > 0
     assert final_state["total_tokens"] > 0
+
+
+@pytest.mark.asyncio
+async def test_graph_state_invariants() -> None:
+    """Test monotonic increment of current_round and relation integrity."""
+    mock_llm = MockLLMProvider()
+    graph = build_debate_graph(llm_provider=mock_llm)
+
+    initial_state: DebateState = {
+        "topic": "Graph Invariants Test",
+        "current_round": 0,
+        "max_rounds": 2,
+        "confidence_threshold": 0.99,  # Force multiple rounds
+        "improvement_threshold": 0.001,
+        "proponent_history": [],
+        "opponent_history": [],
+        "evidence_history": [],
+        "critic_history": [],
+        "judge_history": [],
+        "errors": [],
+    }
+
+    final_state = await graph.ainvoke(initial_state)
+
+    # Invariants:
+    # 1. Monotonic increment of current_round
+    assert final_state["current_round"] == 2
+
+    # 2. History lists should all have length == current_round
+    rounds_executed = final_state["current_round"]
+    assert len(final_state["proponent_history"]) == rounds_executed
+    assert len(final_state["opponent_history"]) == rounds_executed
+    assert len(final_state["evidence_history"]) == rounds_executed
+    assert len(final_state["critic_history"]) == rounds_executed
+    assert len(final_state["judge_history"]) == rounds_executed
+
+    # 3. No fatal errors masquerading as normal state
+    assert not final_state.get("errors")

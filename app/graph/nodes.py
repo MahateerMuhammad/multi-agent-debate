@@ -37,6 +37,8 @@ async def proponent_node(
         return {
             "proponent_history": prop_hist,
             "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
+            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
+            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
             "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
         }
     except Exception as e:
@@ -71,6 +73,8 @@ async def opponent_node(
         return {
             "opponent_history": opp_hist,
             "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
+            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
+            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
             "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
         }
     except Exception as e:
@@ -118,6 +122,8 @@ async def evidence_node(
         return {
             "evidence_history": ev_hist,
             "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
+            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
+            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
             "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
         }
     except Exception as e:
@@ -157,6 +163,8 @@ async def critic_node(
         return {
             "critic_history": crit_hist,
             "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
+            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
+            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
             "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
         }
     except Exception as e:
@@ -213,6 +221,8 @@ async def judge_node(
             "judge_history": jdg_hist,
             "current_round": curr_round,
             "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
+            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
+            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
             "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
         }
     except Exception as e:

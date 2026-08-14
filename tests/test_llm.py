@@ -28,6 +28,7 @@ async def test_mock_provider_text_generation() -> None:
 
     assert response.data == "Qwen test response"
     assert response.provider == "mock"
+    assert response.usage.total_tokens is not None
     assert response.usage.total_tokens > 0
     assert response.latency_seconds >= 0.0
 

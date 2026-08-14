@@ -17,7 +17,6 @@ def get_llm_provider(
     cfg = config or default_settings
     provider_type = (provider_name or cfg.LLM_PROVIDER).lower()
 
-
     if provider_type in ("openrouter", "qwen", "ollama", "vllm", "openai-compatible"):
         if not cfg.LLM_BASE_URL:
             raise LLMConfigurationError(

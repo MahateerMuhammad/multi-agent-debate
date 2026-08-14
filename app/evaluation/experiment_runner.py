@@ -25,7 +25,13 @@ from app.evaluation.metrics import (
     compute_recall_at_k,
     estimate_llm_cost,
 )
-from app.evaluation.schemas import CorrectnessStatus, EvaluationMode, UsageSource
+from app.evaluation.schemas import (
+    ConfidenceStatus,
+    CorrectnessStatus,
+    CostSource,
+    EvaluationMode,
+    UsageSource,
+)
 from app.graph.schemas import StopReason
 from app.graph.workflow import build_debate_graph
 from app.llm.base import BaseLLMProvider
@@ -75,24 +81,29 @@ class MetricResult(BaseModel):
     completeness: float = Field(
         ..., description="Analytical category coverage & length ratio (0.0 - 1.0)"
     )
-    reported_confidence: float = Field(
-        ..., description="Pure model/judge reported confidence rating (0.0 - 1.0), not calibrated."
+    reported_confidence: Optional[float] = Field(
+        default=None,
+        description="Pure model/judge reported confidence rating (0.0 - 1.0), not calibrated.",
     )
+    confidence_status: ConfidenceStatus = Field(..., description="Status of reported confidence")
     evaluator_confidence_score: float = Field(
         ..., description="Composite score of raw confidence and reasoning alignment."
     )
     latency_seconds: float = Field(..., description="Wall-clock time in seconds")
-    prompt_tokens: int = Field(default=0, description="Input/prompt token count")
-    completion_tokens: int = Field(default=0, description="Output/completion token count")
-    total_tokens: int = Field(..., description="Total prompt + completion tokens")
+    usage_available: bool = Field(..., description="Indicates if token usage is available")
+    prompt_tokens: Optional[int] = Field(default=None, description="Input/prompt token count")
+    completion_tokens: Optional[int] = Field(default=None, description="Output/completion token count")
+    total_tokens: Optional[int] = Field(default=None, description="Total prompt + completion tokens")
     usage_source: UsageSource = Field(..., description="Provenance of token usage")
-    prompt_cost_usd: float = Field(default=0.0, description="Estimated prompt input cost in USD")
-    completion_cost_usd: float = Field(
-        default=0.0, description="Estimated completion output cost in USD"
+    cost_source: CostSource = Field(..., description="Provenance of cost calculation")
+    estimated_cost_usd: Optional[float] = Field(
+        default=None, description="Total estimated cost in USD"
     )
-    estimated_cost_usd: float = Field(..., description="Total estimated cost in USD")
     number_of_llm_calls: int = Field(..., description="Count of LLM API requests")
     number_of_debate_rounds: int = Field(..., description="Debate rounds executed")
+    llm_call_traces: list[dict[str, Any]] = Field(
+        default_factory=list, description="Per-call trace ledger of tokens and usage source"
+    )
 
     @property
     def reasoning_quality(self) -> float:
@@ -100,7 +111,7 @@ class MetricResult(BaseModel):
         return self.reasoning_lexical_alignment
 
     @property
-    def confidence(self) -> float:
+    def confidence(self) -> Optional[float]:
         """Alias for backward compatibility."""
         return self.reported_confidence
 
@@ -284,20 +295,32 @@ class EvaluationExperimentRunner:
         else:
             citation_quality = 1.0
 
-        reported_conf = float(getattr(data, "confidence", 1.0))
+        raw_conf = getattr(data, "confidence", None)
+        reported_conf = float(raw_conf) if raw_conf is not None else None
+        conf_status = (
+            ConfidenceStatus.reported if reported_conf is not None else ConfidenceStatus.missing
+        )
         evaluator_conf = round(0.70 + (reasoning_score * 0.20), 4)
 
         prompt_toks = llm_resp.usage.prompt_tokens
         comp_toks = llm_resp.usage.completion_tokens
         tok = llm_resp.usage.total_tokens
-        prompt_cost = estimate_llm_cost(prompt_toks, 0)
-        comp_cost = estimate_llm_cost(0, comp_toks)
-        cost = prompt_cost + comp_cost
 
+        usage_available = prompt_toks is not None
+        if usage_available:
+            prompt_cost = estimate_llm_cost(prompt_toks or 0, 0)
+            comp_cost = estimate_llm_cost(0, comp_toks or 0)
+            cost: Optional[float] = prompt_cost + comp_cost
+        else:
+            cost = None
+
+        cost_source = (
+            CostSource.local_pricing_estimate if usage_available else CostSource.unavailable
+        )
         usage_source = (
             UsageSource.simulated
             if self.eval_mode == EvaluationMode.synthetic
-            else UsageSource.provider_reported
+            else (UsageSource.provider_reported if usage_available else UsageSource.unavailable)
         )
 
         metrics = MetricResult(
@@ -309,17 +332,30 @@ class EvaluationExperimentRunner:
             citation_source_quality=round(citation_quality, 4),
             completeness=completeness,
             reported_confidence=reported_conf,
+            confidence_status=conf_status,
             evaluator_confidence_score=evaluator_conf,
             latency_seconds=latency,
+            usage_available=usage_available,
             prompt_tokens=prompt_toks,
             completion_tokens=comp_toks,
             total_tokens=tok,
             usage_source=usage_source,
-            prompt_cost_usd=round(prompt_cost, 6),
-            completion_cost_usd=round(comp_cost, 6),
-            estimated_cost_usd=round(cost, 6),
+            cost_source=cost_source,
+            estimated_cost_usd=round(cost, 6) if cost is not None else None,
             number_of_llm_calls=1,
             number_of_debate_rounds=0,
+            llm_call_traces=[
+                {
+                    "node": "proponent",
+                    "round": 0,
+                    "prompt_tokens": prompt_toks,
+                    "completion_tokens": comp_toks,
+                    "total_tokens": tok,
+                    "usage_source": usage_source.value,
+                }
+            ]
+            if usage_available
+            else [],
         )
 
         return QueryConditionResult(
@@ -364,20 +400,50 @@ class EvaluationExperimentRunner:
         prop_res = None
         opp_res = None
         round_traces = []
+        llm_call_traces = []
 
         for r in range(rounds):
             round_topic = f"{query_text} [Debate Round {r + 1}]"
             prop_res = await proponent.construct_argument(round_topic)
-            total_toks += prop_res.usage.total_tokens
-            p_toks += prop_res.usage.prompt_tokens
-            c_toks += prop_res.usage.completion_tokens
+            if prop_res.usage.prompt_tokens is not None:
+                p_toks += prop_res.usage.prompt_tokens
+                c_toks += prop_res.usage.completion_tokens or 0
+                total_toks += prop_res.usage.total_tokens or (
+                    prop_res.usage.prompt_tokens + (prop_res.usage.completion_tokens or 0)
+                )
 
             opp_res = await opponent.construct_rebuttal(
                 round_topic, proponent_argument=prop_res.data
             )
-            total_toks += opp_res.usage.total_tokens
-            p_toks += opp_res.usage.prompt_tokens
-            c_toks += opp_res.usage.completion_tokens
+            if opp_res.usage.prompt_tokens is not None:
+                p_toks += opp_res.usage.prompt_tokens
+                c_toks += opp_res.usage.completion_tokens or 0
+                total_toks += opp_res.usage.total_tokens or (
+                    opp_res.usage.prompt_tokens + (opp_res.usage.completion_tokens or 0)
+                )
+
+            if prop_res.usage.prompt_tokens is not None:
+                llm_call_traces.append(
+                    {
+                        "node": "proponent",
+                        "round": r + 1,
+                        "prompt_tokens": prop_res.usage.prompt_tokens,
+                        "completion_tokens": prop_res.usage.completion_tokens,
+                        "total_tokens": prop_res.usage.total_tokens,
+                        "usage_source": prop_res.provider,
+                    }
+                )
+            if opp_res.usage.prompt_tokens is not None:
+                llm_call_traces.append(
+                    {
+                        "node": "opponent",
+                        "round": r + 1,
+                        "prompt_tokens": opp_res.usage.prompt_tokens,
+                        "completion_tokens": opp_res.usage.completion_tokens,
+                        "total_tokens": opp_res.usage.total_tokens,
+                        "usage_source": opp_res.provider,
+                    }
+                )
 
             round_traces.append(
                 {
@@ -448,17 +514,28 @@ class EvaluationExperimentRunner:
         else:
             citation_quality = 1.0
 
-        reported_conf = float(getattr(last_prop, "confidence", 1.0))
+        raw_conf = getattr(last_prop, "confidence", None)
+        reported_conf = float(raw_conf) if raw_conf is not None else None
+        conf_status = (
+            ConfidenceStatus.reported if reported_conf is not None else ConfidenceStatus.missing
+        )
         evaluator_conf = round(0.60 + (reasoning_score * 0.25), 4)
 
-        p_cost = estimate_llm_cost(p_toks, 0)
-        c_cost = estimate_llm_cost(0, c_toks)
-        cost = p_cost + c_cost
+        usage_available = p_toks > 0
+        if usage_available:
+            p_cost = estimate_llm_cost(p_toks, 0)
+            c_cost = estimate_llm_cost(0, c_toks)
+            cost: Optional[float] = p_cost + c_cost
+        else:
+            cost = None
 
+        cost_source = (
+            CostSource.local_pricing_estimate if usage_available else CostSource.unavailable
+        )
         usage_source = (
             UsageSource.simulated
             if self.eval_mode == EvaluationMode.synthetic
-            else UsageSource.provider_reported
+            else (UsageSource.provider_reported if usage_available else UsageSource.unavailable)
         )
 
         metrics = MetricResult(
@@ -470,17 +547,19 @@ class EvaluationExperimentRunner:
             citation_source_quality=round(citation_quality, 4),
             completeness=completeness,
             reported_confidence=reported_conf,
+            confidence_status=conf_status,
             evaluator_confidence_score=evaluator_conf,
             latency_seconds=latency,
-            prompt_tokens=p_toks,
-            completion_tokens=c_toks,
-            total_tokens=total_toks,
+            usage_available=usage_available,
+            prompt_tokens=p_toks if usage_available else None,
+            completion_tokens=c_toks if usage_available else None,
+            total_tokens=total_toks if usage_available else None,
             usage_source=usage_source,
-            prompt_cost_usd=round(p_cost, 6),
-            completion_cost_usd=round(c_cost, 6),
-            estimated_cost_usd=round(cost, 6),
+            cost_source=cost_source,
+            estimated_cost_usd=round(cost, 6) if cost is not None else None,
             number_of_llm_calls=rounds * 2,
             number_of_debate_rounds=rounds,
+            llm_call_traces=llm_call_traces,
         )
 
         return QueryConditionResult(
@@ -659,27 +738,39 @@ class EvaluationExperimentRunner:
         else:
             citation_quality = 1.0
 
-        reported_conf = float(latest_prop.get("confidence", 1.0))
+        raw_conf = latest_prop.get("confidence", None)
+        reported_conf = float(raw_conf) if raw_conf is not None else None
+        conf_status = (
+            ConfidenceStatus.reported if reported_conf is not None else ConfidenceStatus.missing
+        )
         jdg_conf = float(latest_jdg.get("total_score_a", 0.85))
         evaluator_conf = round(0.5 * jdg_conf + 0.5 * reasoning_score, 4)
 
         p_toks = final_state.get("prompt_tokens", 0)
         c_toks = final_state.get("completion_tokens", 0)
         tok = final_state.get("total_tokens", p_toks + c_toks)
-        p_cost = estimate_llm_cost(p_toks, 0)
-        c_cost = estimate_llm_cost(0, c_toks)
-        cost = p_cost + c_cost
 
+        usage_available = p_toks > 0
+        if usage_available:
+            p_cost = estimate_llm_cost(p_toks, 0)
+            c_cost = estimate_llm_cost(0, c_toks)
+            cost: Optional[float] = p_cost + c_cost
+        else:
+            cost = None
+
+        cost_source = (
+            CostSource.local_pricing_estimate if usage_available else CostSource.unavailable
+        )
         usage_source = (
             UsageSource.simulated
             if self.eval_mode == EvaluationMode.synthetic
-            else UsageSource.provider_reported
+            else (UsageSource.provider_reported if usage_available else UsageSource.unavailable)
         )
 
         llm_calls = rounds_run * 5
-        cond_name = (
-            "full_multi_agent_adaptive" if adaptive_stopping else "full_multi_agent_fixed"
-        )
+        cond_name = "full_multi_agent_adaptive" if adaptive_stopping else "full_multi_agent_fixed"
+
+        llm_call_traces = final_state.get("llm_call_traces", [])
 
         metrics = MetricResult(
             correctness=correctness,
@@ -690,17 +781,19 @@ class EvaluationExperimentRunner:
             citation_source_quality=round(citation_quality, 4),
             completeness=completeness,
             reported_confidence=reported_conf,
+            confidence_status=conf_status,
             evaluator_confidence_score=evaluator_conf,
             latency_seconds=latency,
-            prompt_tokens=p_toks,
-            completion_tokens=c_toks,
-            total_tokens=tok,
+            usage_available=usage_available,
+            prompt_tokens=p_toks if usage_available else None,
+            completion_tokens=c_toks if usage_available else None,
+            total_tokens=tok if usage_available else None,
             usage_source=usage_source,
-            prompt_cost_usd=round(p_cost, 6),
-            completion_cost_usd=round(c_cost, 6),
-            estimated_cost_usd=round(cost, 6),
+            cost_source=cost_source,
+            estimated_cost_usd=round(cost, 6) if cost is not None else None,
             number_of_llm_calls=llm_calls,
             number_of_debate_rounds=rounds_run,
+            llm_call_traces=llm_call_traces,
         )
 
         return QueryConditionResult(
@@ -771,21 +864,26 @@ class EvaluationExperimentRunner:
             grounding_vals = [m.evidence_grounding for m in metrics_list]
             citation_vals = [m.citation_source_quality for m in metrics_list]
             completeness_vals = [m.completeness for m in metrics_list]
-            confidence_vals = [m.reported_confidence for m in metrics_list]
+            confidence_vals = [
+                m.reported_confidence for m in metrics_list if m.reported_confidence is not None
+            ]
             latency_vals = [m.latency_seconds for m in metrics_list]
-            token_vals = [float(m.total_tokens) for m in metrics_list]
-            cost_vals = [m.estimated_cost_usd for m in metrics_list]
+            token_vals = [float(m.total_tokens) for m in metrics_list if m.total_tokens is not None]
+            cost_vals = [
+                m.estimated_cost_usd for m in metrics_list if m.estimated_cost_usd is not None
+            ]
             calls_vals = [float(m.number_of_llm_calls) for m in metrics_list]
             rounds_vals = [float(m.number_of_debate_rounds) for m in metrics_list]
 
             mean_corr = sum(correctness_vals) / len(correctness_vals) if correctness_vals else None
             mean_reas = sum(reasoning_vals) / n
             mean_grnd = sum(grounding_vals) / n
-            mean_cost = sum(cost_vals) / n
+            mean_conf = sum(confidence_vals) / len(confidence_vals) if confidence_vals else 0.0
+            mean_toks = sum(token_vals) / len(token_vals) if token_vals else 0.0
+            mean_cost = sum(cost_vals) / len(cost_vals) if cost_vals else 0.0
 
             corr_per_dollar = (
-                round(mean_corr / max(mean_cost, 0.000001), 2)
-                if mean_corr is not None else 0.0
+                round(mean_corr / max(mean_cost, 0.000001), 2) if mean_corr is not None else 0.0
             )
 
             if cond_name == "full_multi_agent_fixed":
@@ -802,15 +900,15 @@ class EvaluationExperimentRunner:
                 mean_correctness=round(mean_corr, 4) if mean_corr is not None else None,
                 mean_reasoning_quality=round(mean_reas, 4),
                 mean_evidence_grounding=round(mean_grnd, 4),
-                mean_citation_source_quality=round(sum(citation_vals) / n, 4),
-                mean_completeness=round(sum(completeness_vals) / n, 4),
-                mean_confidence=round(sum(confidence_vals) / n, 4),
-                mean_latency_seconds=round(sum(latency_vals) / n, 3),
-                mean_total_tokens=round(sum(token_vals) / n, 1),
-                mean_estimated_cost_usd=round(mean_cost, 6),
-                total_cost_usd=round(sum(cost_vals), 6),
-                mean_llm_calls=round(sum(calls_vals) / n, 2),
-                mean_debate_rounds=round(sum(rounds_vals) / n, 2),
+                mean_citation_source_quality=sum(citation_vals) / n,
+                mean_completeness=sum(completeness_vals) / n,
+                mean_confidence=mean_conf,
+                mean_latency_seconds=sum(latency_vals) / n,
+                mean_total_tokens=mean_toks,
+                mean_estimated_cost_usd=mean_cost,
+                total_cost_usd=sum(cost_vals),
+                mean_llm_calls=sum(calls_vals) / n,
+                mean_debate_rounds=sum(rounds_vals) / n,
                 correctness_per_dollar=corr_per_dollar,
                 adaptive_cost_savings_pct=savings_pct,
                 std_correctness=_stddev(correctness_vals) if len(correctness_vals) > 0 else None,
@@ -974,15 +1072,18 @@ class EvaluationExperimentRunner:
         for res in report.detailed_query_results:
             m = res.metrics
             corr_str = f"{m.correctness:.4f}" if m.correctness is not None else "N/A"
+            conf_str = (
+                f"{m.reported_confidence:.4f}" if m.reported_confidence is not None else "N/A"
+            )
+            tok_str = f"{m.total_tokens}" if m.total_tokens is not None else "N/A"
             lines.append(
                 f"| `{res.query_id}` | `{res.condition}` | {corr_str} | "
                 f"{m.reasoning_lexical_alignment:.4f} | {m.evidence_grounding:.4f} | "
                 f"{m.citation_source_quality:.4f} | {m.completeness:.4f} | "
-                f"{m.reported_confidence:.4f} | `{res.stop_reason.value}` | "
-                f"{m.latency_seconds:.2f}s | {m.total_tokens} |"
+                f"{conf_str} | `{res.stop_reason.value}` | "
+                f"{m.latency_seconds:.2f}s | {tok_str} |"
             )
 
         return "\n".join(lines)
-
 
         return "\n".join(lines)

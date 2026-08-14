@@ -36,7 +36,9 @@ class SimpleDebateRunner:
         )
 
         total_latency = proponent_res.latency_seconds + opponent_res.latency_seconds
-        total_tokens = proponent_res.usage.total_tokens + opponent_res.usage.total_tokens
+        total_tokens = (proponent_res.usage.total_tokens or 0) + (
+            opponent_res.usage.total_tokens or 0
+        )
 
         return SimpleDebateResult(
             topic=topic.strip(),
@@ -120,10 +122,10 @@ class FullDebateRunner:
             + judge_res.latency_seconds
         )
         total_tokens = (
-            prop_res.usage.total_tokens
-            + opp_res.usage.total_tokens
-            + critic_res.usage.total_tokens
-            + judge_res.usage.total_tokens
+            (prop_res.usage.total_tokens or 0)
+            + (opp_res.usage.total_tokens or 0)
+            + (critic_res.usage.total_tokens or 0)
+            + (judge_res.usage.total_tokens or 0)
         )
 
         return FullDebateResult(

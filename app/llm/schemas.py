@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Generic, Optional, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -12,9 +12,9 @@ T = TypeVar("T")
 class LLMUsage(BaseModel):
     """Token usage metrics."""
 
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
 
 
 class LLMResponse(BaseModel, Generic[T]):
@@ -48,8 +48,8 @@ class ArgumentOutput(BaseModel):
     supporting_evidence: list[str] = Field(
         default_factory=list, description="Evidence items supporting the claim"
     )
-    confidence: float = Field(
-        default=1.0, ge=0.0, le=1.0, description="Self-assessed confidence score (0 to 1)"
+    confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0, description="Self-assessed confidence score (0 to 1)"
     )
 
 

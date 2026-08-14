@@ -39,6 +39,57 @@ def test_metric_cost_and_completeness_calculation() -> None:
     assert completeness_3 == pytest.approx(0.6667, abs=1e-3)
 
 
+def test_state_token_accumulation() -> None:
+    """Verify that DebateState correctly accumulates token sums across multiple calls via operator.add"""
+    from langgraph.graph import END, START, StateGraph
+
+    from app.graph.state import DebateState
+
+    builder = StateGraph(DebateState)
+
+    def node_1(state: DebateState) -> dict[str, int]:
+        return {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+
+    def node_2(state: DebateState) -> dict[str, int]:
+        return {"prompt_tokens": 200, "completion_tokens": 75, "total_tokens": 275}
+
+    def node_3(state: DebateState) -> dict[str, int]:
+        return {"prompt_tokens": 300, "completion_tokens": 125, "total_tokens": 425}
+
+    builder.add_node("n1", node_1)
+    builder.add_node("n2", node_2)
+    builder.add_node("n3", node_3)
+    builder.add_edge(START, "n1")
+    builder.add_edge("n1", "n2")
+    builder.add_edge("n2", "n3")
+    builder.add_edge("n3", END)
+    graph = builder.compile()
+
+    from typing import Any, cast
+
+    state = graph.invoke(
+        cast(
+            Any,
+            {
+                "topic": "test",
+                "current_round": 1,
+                "max_rounds": 3,
+                "confidence_threshold": 1.0,
+                "improvement_threshold": 0.0,
+                "proponent_history": [],
+                "opponent_history": [],
+                "evidence_history": [],
+                "critic_history": [],
+                "judge_history": [],
+                "errors": [],
+            },
+        )
+    )
+    assert state["prompt_tokens"] == 600
+    assert state["completion_tokens"] == 250
+    assert state["total_tokens"] == 850
+
+
 @pytest.mark.asyncio
 async def test_experiment_runner_single_query(tmp_path: Path) -> None:
     """Test running all 4 conditions on a single benchmark query with MockLLMProvider."""
@@ -75,9 +126,8 @@ async def test_experiment_runner_single_query(tmp_path: Path) -> None:
     assert res_single.metrics.correctness is None
     assert res_single.metrics.correctness_status == CorrectnessStatus.not_evaluable
     assert res_single.metrics.usage_source == UsageSource.simulated
-    assert (
-        res_single.metrics.total_tokens
-        == res_single.metrics.prompt_tokens + res_single.metrics.completion_tokens
+    assert res_single.metrics.total_tokens == (res_single.metrics.prompt_tokens or 0) + (
+        res_single.metrics.completion_tokens or 0
     )
 
     res_2agent = await runner.run_two_agent_debate(query, rounds=2)
@@ -87,9 +137,8 @@ async def test_experiment_runner_single_query(tmp_path: Path) -> None:
     assert res_2agent.metrics.correctness is None
     assert res_2agent.metrics.correctness_status == CorrectnessStatus.not_evaluable
     assert res_2agent.metrics.usage_source == UsageSource.simulated
-    assert (
-        res_2agent.metrics.total_tokens
-        == res_2agent.metrics.prompt_tokens + res_2agent.metrics.completion_tokens
+    assert res_2agent.metrics.total_tokens == (res_2agent.metrics.prompt_tokens or 0) + (
+        res_2agent.metrics.completion_tokens or 0
     )
 
     res_fixed = await runner.run_full_multi_agent(query, adaptive_stopping=False, max_rounds=2)
@@ -99,9 +148,8 @@ async def test_experiment_runner_single_query(tmp_path: Path) -> None:
     assert res_fixed.metrics.correctness is None
     assert res_fixed.metrics.correctness_status == CorrectnessStatus.not_evaluable
     assert res_fixed.metrics.usage_source == UsageSource.simulated
-    assert (
-        res_fixed.metrics.total_tokens
-        == res_fixed.metrics.prompt_tokens + res_fixed.metrics.completion_tokens
+    assert res_fixed.metrics.total_tokens == (res_fixed.metrics.prompt_tokens or 0) + (
+        res_fixed.metrics.completion_tokens or 0
     )
 
     res_adaptive = await runner.run_full_multi_agent(query, adaptive_stopping=True, max_rounds=5)
@@ -110,9 +158,8 @@ async def test_experiment_runner_single_query(tmp_path: Path) -> None:
     assert res_adaptive.metrics.correctness is None
     assert res_adaptive.metrics.correctness_status == CorrectnessStatus.not_evaluable
     assert res_adaptive.metrics.usage_source == UsageSource.simulated
-    assert (
-        res_adaptive.metrics.total_tokens
-        == res_adaptive.metrics.prompt_tokens + res_adaptive.metrics.completion_tokens
+    assert res_adaptive.metrics.total_tokens == (res_adaptive.metrics.prompt_tokens or 0) + (
+        res_adaptive.metrics.completion_tokens or 0
     )
 
 
@@ -142,7 +189,6 @@ async def test_full_experiment_suite_and_saving(tmp_path: Path) -> None:
     md_text = md_file.read_text(encoding="utf-8")
     assert "# Phase 7 Evaluation Framework Report" in md_text
     assert "SYNTHETIC / INFRASTRUCTURE VALIDATION MODE" in md_text
-
 
 
 @pytest.mark.asyncio
@@ -211,12 +257,10 @@ async def test_evidence_node_signature_no_type_error() -> None:
         "errors": [],
     }
 
-
     result = await evidence_node(state, llm_provider=provider)
     assert not result.get("errors")
     assert "evidence_history" in result
     assert len(result["evidence_history"]) == 1
-
 
 
 @pytest.mark.asyncio
@@ -277,4 +321,3 @@ async def test_graph_state_invariants() -> None:
     assert len(final_state.get("evidence_history", [])) == curr_round
     assert len(final_state.get("critic_history", [])) == curr_round
     assert len(final_state.get("judge_history", [])) == curr_round
-

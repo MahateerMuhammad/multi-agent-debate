@@ -35,7 +35,7 @@ def test_metric_cost_and_completeness_calculation() -> None:
         prompt_tokens=100,
         completion_tokens=50,
         prompt_rate_per_1k=0.0015,
-        completion_rate_per_1k=0.0020
+        completion_rate_per_1k=0.0020,
     )
     assert cost_both == pytest.approx((100 / 1000.0) * 0.0015 + (50 / 1000.0) * 0.0020)
 
@@ -56,26 +56,26 @@ def test_compute_reasoning_lexical_alignment() -> None:
     # Example 1: Claim and reasoning strongly overlap. Expected: high lexical alignment.
     high_align = compute_reasoning_lexical_alignment(
         "Open source models improve security significantly through decentralization",
-        ["Open source models improve security significantly by allowing decentralized code audits."]
+        [
+            "Open source models improve security significantly by allowing decentralized code audits."
+        ],
     )
     assert high_align >= 0.60
 
     # Example 2: Claim and reasoning have little lexical overlap. Expected: low lexical alignment.
     low_align = compute_reasoning_lexical_alignment(
         "The project needs more funding.",
-        ["Apples are usually red or green and grow on trees in orchards."]
+        ["Apples are usually red or green and grow on trees in orchards."],
     )
     assert low_align <= 0.45
 
     # Example 3: Semantically good reasoning with low lexical overlap. Expected: metric scores low.
     semantic_good_low_align = compute_reasoning_lexical_alignment(
         "Automobiles contribute heavily to atmospheric warming.",
-        ["Internal combustion engines release massive volumes of greenhouse gases daily."]
+        ["Internal combustion engines release massive volumes of greenhouse gases daily."],
     )
     assert semantic_good_low_align <= 0.65
     assert semantic_good_low_align < high_align
-
-
 
 
 def test_compute_fallacy_density() -> None:

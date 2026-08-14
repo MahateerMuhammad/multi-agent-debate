@@ -23,8 +23,26 @@ def compute_reasoning_lexical_alignment(claim: str, reasoning_points: list[str])
         return 0.20
 
     stopwords = {
-        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
-        "to", "of", "in", "for", "on", "with", "by", "about", "that", "this"
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "is",
+        "are",
+        "was",
+        "were",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "by",
+        "about",
+        "that",
+        "this",
     }
     claim_words = set(
         w.lower() for w in re.findall(r"\b[a-zA-Z]{3,}\b", claim) if w.lower() not in stopwords
@@ -42,12 +60,10 @@ def compute_reasoning_lexical_alignment(claim: str, reasoning_points: list[str])
         length_ratio = min(len(pt.split()) / 12.0, 1.0)
         relevance_scores.append(0.5 * overlap + 0.5 * length_ratio)
 
-
     avg_rel = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.5
     count_factor = min(len(reasoning_points) / 3.0, 1.0)
 
     return round(0.6 * avg_rel + 0.4 * count_factor, 4)
-
 
 
 def compute_fallacy_density(fallacies: list[str], total_claims: int = 1) -> float:
@@ -258,12 +274,58 @@ def compute_faithfulness_score(generated_claim: str, context_text: str) -> float
         return 1.0
 
     stopwords = {
-        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
-        "to", "of", "in", "for", "on", "with", "by", "about", "that", "this",
-        "these", "those", "from", "at", "as", "be", "been", "being", "have",
-        "has", "had", "do", "does", "did", "not", "no", "can", "could",
-        "should", "would", "may", "might", "must", "shall", "will", "mock",
-        "analysis", "item", "content", "regarding", "showing", "providing"
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "is",
+        "are",
+        "was",
+        "were",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "by",
+        "about",
+        "that",
+        "this",
+        "these",
+        "those",
+        "from",
+        "at",
+        "as",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "not",
+        "no",
+        "can",
+        "could",
+        "should",
+        "would",
+        "may",
+        "might",
+        "must",
+        "shall",
+        "will",
+        "mock",
+        "analysis",
+        "item",
+        "content",
+        "regarding",
+        "showing",
+        "providing",
     }
 
     words = re.findall(r"\b[a-zA-Z0-9\-\.]{3,}\b", generated_claim.lower())
@@ -360,9 +422,7 @@ def compute_citation_split_metrics(
 
     # 1. Metadata Accuracy
     valid_meta = sum(
-        1
-        for cite in citations
-        if cite.get("title") or cite.get("doc_id") or cite.get("source")
+        1 for cite in citations if cite.get("title") or cite.get("doc_id") or cite.get("source")
     )
     meta_acc = valid_meta / len(citations)
 
@@ -401,10 +461,44 @@ def compute_citation_split_metrics(
 
     # 4. Citation Entailment (lexical overlap ratio of claims against cited passage text)
     stopwords = {
-        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
-        "to", "of", "in", "for", "on", "with", "by", "about", "that", "this",
-        "these", "those", "from", "at", "as", "be", "been", "being", "have",
-        "has", "had", "do", "does", "did", "not", "no", "can", "could"
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "is",
+        "are",
+        "was",
+        "were",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "by",
+        "about",
+        "that",
+        "this",
+        "these",
+        "those",
+        "from",
+        "at",
+        "as",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "not",
+        "no",
+        "can",
+        "could",
     }
     all_claim_words: set[str] = set()
 

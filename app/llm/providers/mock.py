@@ -109,9 +109,7 @@ class MockLLMProvider(BaseLLMProvider):
             provider=self.provider_name,
         )
 
-    def _generate_default_json(
-        self, response_model: type[BaseModel], prompt: str = ""
-    ) -> str:
+    def _generate_default_json(self, response_model: type[BaseModel], prompt: str = "") -> str:
         """Construct query-sensitive, role-aware, and round-dependent mock JSON."""
         schema = response_model.model_json_schema()
         properties = schema.get("properties", {})
@@ -185,14 +183,15 @@ class MockLLMProvider(BaseLLMProvider):
                     f"Mock {prop_name} statement for {topic_key} round {round_num}"
                 )
 
+            elif prop_name == "confidence":
+                conf_val = 0.75 + (round_num * 0.06) + ((prompt_hash % 7) / 100.0)
+                dummy_data[prop_name] = round(min(conf_val, 0.94), 2)
+
             elif prop_type in ("number", "integer"):
                 if prop_name in ("total_score_a", "total_score_b"):
                     # Gradually increase score across rounds to test adaptive stopping thresholds
                     base_score = 0.72 + (round_num * 0.08) + ((prompt_hash % 5) / 100.0)
                     dummy_data[prop_name] = round(min(base_score, 0.96), 2)
-                elif prop_name == "confidence":
-                    conf_val = 0.75 + (round_num * 0.06) + ((prompt_hash % 7) / 100.0)
-                    dummy_data[prop_name] = round(min(conf_val, 0.94), 2)
                 else:
                     dummy_data[prop_name] = round(0.70 + (prompt_hash % 25) / 100.0, 2)
 
@@ -235,14 +234,18 @@ class MockLLMProvider(BaseLLMProvider):
 
                     elif prop_name == "reasoning":
                         if topic_key == "opensource":
-                            dummy_data[prop_name] = [
-                                "Public code visibility enables global vulnerability auditing.",
-                                "Monolithic API lock-in creates single point vulnerability.",
-                            ] if round_num == 1 else [
-                                "Public code visibility enables global vulnerability auditing.",
-                                "Monolithic API lock-in creates single point vulnerability.",
-                                f"Round {round_num} safety benchmarks show open resilience.",
-                            ]
+                            dummy_data[prop_name] = (
+                                [
+                                    "Public code visibility enables global vulnerability auditing.",
+                                    "Monolithic API lock-in creates single point vulnerability.",
+                                ]
+                                if round_num == 1
+                                else [
+                                    "Public code visibility enables global vulnerability auditing.",
+                                    "Monolithic API lock-in creates single point vulnerability.",
+                                    f"Round {round_num} safety benchmarks show open resilience.",
+                                ]
+                            )
                         elif topic_key == "legal":
                             dummy_data[prop_name] = [
                                 "Algorithmic decision systems lack human discretionary nuance.",
@@ -262,8 +265,6 @@ class MockLLMProvider(BaseLLMProvider):
                             dummy_data[prop_name] = [
                                 f"Round {round_num} rebuttal: Automated sensors reduce bias."
                             ]
-
-
 
                     elif prop_name == "logical_fallacies":
                         has_fallacy = (prompt_hash + round_num) % 3 == 0

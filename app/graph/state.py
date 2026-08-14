@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
 from app.graph.schemas import StopReason
 
@@ -22,8 +23,9 @@ class DebateState(TypedDict, total=False):
     judge_history: list[dict[str, Any]]
     is_finished: bool
     stop_reason: StopReason
-    total_latency: float
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+    total_latency: Annotated[float, operator.add]
+    prompt_tokens: Annotated[int, operator.add]
+    completion_tokens: Annotated[int, operator.add]
+    total_tokens: Annotated[int, operator.add]
+    llm_call_traces: Annotated[list[dict[str, Any]], operator.add]
     errors: list[str]

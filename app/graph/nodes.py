@@ -34,12 +34,33 @@ async def proponent_node(
         prop_hist = list(state.get("proponent_history", []))
         prop_hist.append(arg_dict)
 
+        p_tok = res.usage.prompt_tokens if res.usage and res.usage.prompt_tokens is not None else 0
+        c_tok = (
+            res.usage.completion_tokens
+            if res.usage and res.usage.completion_tokens is not None
+            else 0
+        )
+        t_tok = (
+            res.usage.total_tokens
+            if res.usage and res.usage.total_tokens is not None
+            else p_tok + c_tok
+        )
+        trace = {
+            "node": "proponent",
+            "round": curr_round,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "usage_source": res.provider,
+        }
+
         return {
             "proponent_history": prop_hist,
-            "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
-            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
-            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
-            "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
+            "total_latency": res.latency_seconds,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "llm_call_traces": [trace],
         }
     except Exception as e:
         errors.append(f"proponent_node failure: {e}")
@@ -70,12 +91,33 @@ async def opponent_node(
         opp_hist = list(state.get("opponent_history", []))
         opp_hist.append(rebuttal_dict)
 
+        p_tok = res.usage.prompt_tokens if res.usage and res.usage.prompt_tokens is not None else 0
+        c_tok = (
+            res.usage.completion_tokens
+            if res.usage and res.usage.completion_tokens is not None
+            else 0
+        )
+        t_tok = (
+            res.usage.total_tokens
+            if res.usage and res.usage.total_tokens is not None
+            else p_tok + c_tok
+        )
+        trace = {
+            "node": "opponent",
+            "round": curr_round,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "usage_source": res.provider,
+        }
+
         return {
             "opponent_history": opp_hist,
-            "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
-            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
-            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
-            "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
+            "total_latency": res.latency_seconds,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "llm_call_traces": [trace],
         }
     except Exception as e:
         errors.append(f"opponent_node failure: {e}")
@@ -93,7 +135,6 @@ async def evidence_node(
     round_topic = f"{topic} [Debate Round {curr_round}]"
     errors = list(state.get("errors", []))
     prop_hist = state.get("proponent_history", [])
-
 
     if not prop_hist:
         errors.append("evidence_node failure: missing proponent_history")
@@ -119,12 +160,33 @@ async def evidence_node(
         ev_hist = list(state.get("evidence_history", []))
         ev_hist.append(ev_dict)
 
+        p_tok = res.usage.prompt_tokens if res.usage and res.usage.prompt_tokens is not None else 0
+        c_tok = (
+            res.usage.completion_tokens
+            if res.usage and res.usage.completion_tokens is not None
+            else 0
+        )
+        t_tok = (
+            res.usage.total_tokens
+            if res.usage and res.usage.total_tokens is not None
+            else p_tok + c_tok
+        )
+        trace = {
+            "node": "evidence",
+            "round": curr_round,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "usage_source": res.provider,
+        }
+
         return {
             "evidence_history": ev_hist,
-            "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
-            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
-            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
-            "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
+            "total_latency": res.latency_seconds,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "llm_call_traces": [trace],
         }
     except Exception as e:
         errors.append(f"evidence_node failure: {e}")
@@ -160,12 +222,33 @@ async def critic_node(
         crit_hist = list(state.get("critic_history", []))
         crit_hist.append(critic_dict)
 
+        p_tok = res.usage.prompt_tokens if res.usage and res.usage.prompt_tokens is not None else 0
+        c_tok = (
+            res.usage.completion_tokens
+            if res.usage and res.usage.completion_tokens is not None
+            else 0
+        )
+        t_tok = (
+            res.usage.total_tokens
+            if res.usage and res.usage.total_tokens is not None
+            else p_tok + c_tok
+        )
+        trace = {
+            "node": "critic",
+            "round": curr_round,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "usage_source": res.provider,
+        }
+
         return {
             "critic_history": crit_hist,
-            "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
-            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
-            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
-            "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
+            "total_latency": res.latency_seconds,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "llm_call_traces": [trace],
         }
     except Exception as e:
         errors.append(f"critic_node failure: {e}")
@@ -217,13 +300,34 @@ async def judge_node(
         jdg_hist = list(state.get("judge_history", []))
         jdg_hist.append(judge_dict)
 
+        p_tok = res.usage.prompt_tokens if res.usage and res.usage.prompt_tokens is not None else 0
+        c_tok = (
+            res.usage.completion_tokens
+            if res.usage and res.usage.completion_tokens is not None
+            else 0
+        )
+        t_tok = (
+            res.usage.total_tokens
+            if res.usage and res.usage.total_tokens is not None
+            else p_tok + c_tok
+        )
+        trace = {
+            "node": "judge",
+            "round": curr_round,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "usage_source": res.provider,
+        }
+
         return {
             "judge_history": jdg_hist,
             "current_round": curr_round,
-            "total_latency": state.get("total_latency", 0.0) + res.latency_seconds,
-            "prompt_tokens": state.get("prompt_tokens", 0) + res.usage.prompt_tokens,
-            "completion_tokens": state.get("completion_tokens", 0) + res.usage.completion_tokens,
-            "total_tokens": state.get("total_tokens", 0) + res.usage.total_tokens,
+            "total_latency": res.latency_seconds,
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "total_tokens": t_tok,
+            "llm_call_traces": [trace],
         }
     except Exception as e:
         errors.append(f"judge_node failure: {e}")

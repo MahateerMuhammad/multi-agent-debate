@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Generic, Optional, TypeVar
+from typing import Any, Generic, Optional, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 T = TypeVar("T")
 
@@ -30,6 +30,80 @@ class LLMResponse(BaseModel, Generic[T]):
 
 # Structured Output Schemas for Multi-Agent Debate
 
+def robust_llm_validator(cls, values: Any) -> Any:
+    """Shock absorber for open-source LLMs that slightly deviate from JSON schemas."""
+    if not isinstance(values, dict):
+        return values
+        
+    # Flatten common nested wrappers
+    if len(values) == 1 and "evaluation" in values and isinstance(values["evaluation"], dict):
+        values = values["evaluation"]
+    if len(values) == 1 and "scores" in values and isinstance(values["scores"], dict):
+        values = values["scores"]
+        
+    cleaned = {}
+    key_mapping = {
+        "central_claim": "claim",
+        "argument_a": "argument_a_analysis",
+        "argument_b": "argument_b_analysis",
+    }
+    
+    for k, v in values.items():
+        k = key_mapping.get(k, k)
+        
+        # Specific fix for JudgeOutput rubric_scores
+        if k == "rubric_scores" and isinstance(v, list):
+            new_list = []
+            for item in v:
+                if isinstance(item, str):
+                    new_list.append({
+                        "dimension": item, 
+                        "score_a": 0.5, 
+                        "score_b": 0.5, 
+                        "justification": "Model failed to provide justification."
+                    })
+                elif isinstance(item, dict):
+                    new_list.append(item)
+            cleaned[k] = new_list
+            continue
+
+        # Flatten list of dicts to list of strings
+        if isinstance(v, list):
+            new_list = []
+            for item in v:
+                if isinstance(item, dict):
+                    val = next(iter(item.values()), "")
+                    new_list.append(str(val))
+                else:
+                    new_list.append(item)
+            cleaned[k] = new_list
+        else:
+            cleaned[k] = v
+            
+    # Supply missing defaults for strict scalar fields to prevent catastrophic failure
+    if cls.__name__ == "ArgumentOutput":
+        cleaned.setdefault("claim", "Missing claim")
+        cleaned.setdefault("reasoning", [])
+    elif cls.__name__ == "CriticOutput":
+        cleaned.setdefault("argument_a_analysis", "Missing analysis")
+        cleaned.setdefault("argument_b_analysis", "Missing analysis")
+        cleaned.setdefault("counterargument_quality_score", 0.5)
+    elif cls.__name__ == "JudgeOutput":
+        cleaned.setdefault("winner", "Tie")
+        cleaned.setdefault("verdict_summary", "Missing verdict")
+        cleaned.setdefault("rubric_scores", [])
+        cleaned.setdefault("total_score_a", 0.5)
+        cleaned.setdefault("total_score_b", 0.5)
+        cleaned.setdefault("key_deciding_factors", [])
+    elif cls.__name__ == "EvidenceVerificationOutput":
+        cleaned.setdefault("claim", "Missing claim")
+        cleaned.setdefault("status", "insufficient")
+        cleaned.setdefault("is_verified", False)
+        cleaned.setdefault("confidence", 0.5)
+        cleaned.setdefault("reasoning", "Missing reasoning")
+        
+    return cleaned
+
 
 class ResearcherOutput(BaseModel):
     """Structured research findings for a given topic or claim."""
@@ -42,6 +116,11 @@ class ResearcherOutput(BaseModel):
 
 class ArgumentOutput(BaseModel):
     """Structured proposition argument constructed by a Proponent agent."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate(cls, values: Any) -> Any:
+        return robust_llm_validator(cls, values)
 
     claim: str = Field(..., description="The main claim being asserted")
     reasoning: list[str] = Field(..., description="Step-by-step reasoning points")
@@ -56,6 +135,11 @@ class ArgumentOutput(BaseModel):
 class RebuttalOutput(BaseModel):
     """Structured counter-argument constructed by an Opponent agent."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _validate(cls, values: Any) -> Any:
+        return robust_llm_validator(cls, values)
+
     target_claim: str = Field(..., description="The claim being opposed")
     counter_arguments: list[str] = Field(..., description="Key rebuttal arguments")
     flaws_identified: list[str] = Field(
@@ -65,6 +149,11 @@ class RebuttalOutput(BaseModel):
 
 class CriticOutput(BaseModel):
     """Structured position-neutral evaluation produced by a Critic agent."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate(cls, values: Any) -> Any:
+        return robust_llm_validator(cls, values)
 
     argument_a_analysis: str = Field(
         ..., description="Neutral analysis of Argument A strengths/weaknesses"
@@ -91,6 +180,11 @@ class CriticOutput(BaseModel):
 
 class EvidenceVerificationOutput(BaseModel):
     """Structured verification output produced by an Evidence verification agent."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate(cls, values: Any) -> Any:
+        return robust_llm_validator(cls, values)
 
     claim: str = Field(..., description="The claim being verified")
     status: str = Field(
@@ -121,6 +215,11 @@ class RubricDimensionScore(BaseModel):
 
 class JudgeOutput(BaseModel):
     """Structured final evaluation and winner determination produced by a Judge agent."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate(cls, values: Any) -> Any:
+        return robust_llm_validator(cls, values)
 
     winner: str = Field(..., description="Declared winner ('Position A', 'Position B', or 'Tie')")
     verdict_summary: str = Field(

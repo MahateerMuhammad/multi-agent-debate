@@ -64,7 +64,17 @@ async def proponent_node(
         }
     except Exception as e:
         errors.append(f"proponent_node failure: {e}")
-        return {"errors": errors}
+        err_state = {"errors": errors}
+        if hasattr(e, "usage") and getattr(e, "usage", None):
+            p_tok = getattr(e.usage, "prompt_tokens", 0) or 0
+            c_tok = getattr(e.usage, "completion_tokens", 0) or 0
+            t_tok = getattr(e.usage, "total_tokens", 0) or 0
+            err_state["prompt_tokens"] = p_tok
+            err_state["completion_tokens"] = c_tok
+            err_state["total_tokens"] = t_tok
+        if hasattr(e, "latency_seconds") and getattr(e, "latency_seconds", None):
+            err_state["total_latency"] = getattr(e, "latency_seconds")
+        return err_state
 
 
 async def opponent_node(
@@ -121,7 +131,17 @@ async def opponent_node(
         }
     except Exception as e:
         errors.append(f"opponent_node failure: {e}")
-        return {"errors": errors}
+        err_state = {"errors": errors}
+        if hasattr(e, "usage") and getattr(e, "usage", None):
+            p_tok = getattr(e.usage, "prompt_tokens", 0) or 0
+            c_tok = getattr(e.usage, "completion_tokens", 0) or 0
+            t_tok = getattr(e.usage, "total_tokens", 0) or 0
+            err_state["prompt_tokens"] = p_tok
+            err_state["completion_tokens"] = c_tok
+            err_state["total_tokens"] = t_tok
+        if hasattr(e, "latency_seconds") and getattr(e, "latency_seconds", None):
+            err_state["total_latency"] = getattr(e, "latency_seconds")
+        return err_state
 
 
 async def evidence_node(
@@ -190,7 +210,17 @@ async def evidence_node(
         }
     except Exception as e:
         errors.append(f"evidence_node failure: {e}")
-        return {"errors": errors}
+        err_state = {"errors": errors}
+        if hasattr(e, "usage") and getattr(e, "usage", None):
+            p_tok = getattr(e.usage, "prompt_tokens", 0) or 0
+            c_tok = getattr(e.usage, "completion_tokens", 0) or 0
+            t_tok = getattr(e.usage, "total_tokens", 0) or 0
+            err_state["prompt_tokens"] = p_tok
+            err_state["completion_tokens"] = c_tok
+            err_state["total_tokens"] = t_tok
+        if hasattr(e, "latency_seconds") and getattr(e, "latency_seconds", None):
+            err_state["total_latency"] = getattr(e, "latency_seconds")
+        return err_state
 
 
 async def critic_node(
@@ -252,7 +282,17 @@ async def critic_node(
         }
     except Exception as e:
         errors.append(f"critic_node failure: {e}")
-        return {"errors": errors}
+        err_state = {"errors": errors}
+        if hasattr(e, "usage") and getattr(e, "usage", None):
+            p_tok = getattr(e.usage, "prompt_tokens", 0) or 0
+            c_tok = getattr(e.usage, "completion_tokens", 0) or 0
+            t_tok = getattr(e.usage, "total_tokens", 0) or 0
+            err_state["prompt_tokens"] = p_tok
+            err_state["completion_tokens"] = c_tok
+            err_state["total_tokens"] = t_tok
+        if hasattr(e, "latency_seconds") and getattr(e, "latency_seconds", None):
+            err_state["total_latency"] = getattr(e, "latency_seconds")
+        return err_state
 
 
 async def judge_node(
@@ -331,4 +371,14 @@ async def judge_node(
         }
     except Exception as e:
         errors.append(f"judge_node failure: {e}")
-        return {"errors": errors}
+        err_state = {"errors": errors}
+        if hasattr(e, "usage") and getattr(e, "usage", None):
+            p_tok = getattr(e.usage, "prompt_tokens", 0) or 0
+            c_tok = getattr(e.usage, "completion_tokens", 0) or 0
+            t_tok = getattr(e.usage, "total_tokens", 0) or 0
+            err_state["prompt_tokens"] = p_tok
+            err_state["completion_tokens"] = c_tok
+            err_state["total_tokens"] = t_tok
+        if hasattr(e, "latency_seconds") and getattr(e, "latency_seconds", None):
+            err_state["total_latency"] = getattr(e, "latency_seconds")
+        return err_state

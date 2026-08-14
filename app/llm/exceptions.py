@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 
+from typing import Optional
+from app.llm.schemas import LLMUsage
+
 class LLMError(Exception):
     """Base exception class for all LLM errors."""
 
-    pass
+    def __init__(self, message: str, usage: Optional[LLMUsage] = None, latency_seconds: Optional[float] = None):
+        super().__init__(message)
+        self.usage = usage
+        self.latency_seconds = latency_seconds
 
 
 class LLMConfigurationError(LLMError):
@@ -20,6 +26,9 @@ class LLMTimeoutError(LLMError):
 
     pass
 
+
+from typing import Optional
+from app.llm.schemas import LLMUsage
 
 class LLMValidationError(LLMError):
     """Raised when an LLM response fails JSON parsing or Pydantic validation after retries."""

@@ -84,6 +84,8 @@ class QwenProvider(BaseLLMProvider):
             "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
         }
+        if "response_format" in kwargs:
+            payload["response_format"] = kwargs["response_format"]
 
         start_time = time.perf_counter()
         last_exception: Exception | None = None
@@ -161,23 +163,37 @@ class QwenProvider(BaseLLMProvider):
         """Generate structured response matching Pydantic response_model schema."""
         self.validate_prompt(prompt)
 
-        schema_json = json.dumps(response_model.model_json_schema(), indent=2)
-        format_instruction = (
-            "\n\nYou MUST respond ONLY with a valid JSON object matching the following schema:\n"
-            f"```json\n{schema_json}\n```\nDo not include commentary outside the JSON block."
-        )
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": response_model.__name__,
+                "strict": True,
+                "schema": response_model.model_json_schema()
+            }
+        }
 
-        full_prompt = f"{prompt}{format_instruction}"
+        full_prompt = prompt
         start_time = time.perf_counter()
         last_exception: Exception | None = None
+        
+        cumulative_usage = LLMUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
         for attempt in range(1, self.max_retries + 1):
             try:
                 raw_response = await self.generate(
                     prompt=full_prompt,
                     system_prompt=system_prompt,
+                    response_format=response_format,
                     **kwargs,
                 )
+                
+                # Accumulate tokens across all attempts
+                if raw_response.usage.prompt_tokens is not None:
+                    cumulative_usage.prompt_tokens = (cumulative_usage.prompt_tokens or 0) + raw_response.usage.prompt_tokens
+                if raw_response.usage.completion_tokens is not None:
+                    cumulative_usage.completion_tokens = (cumulative_usage.completion_tokens or 0) + raw_response.usage.completion_tokens
+                if raw_response.usage.total_tokens is not None:
+                    cumulative_usage.total_tokens = (cumulative_usage.total_tokens or 0) + raw_response.usage.total_tokens
 
                 clean_json_str = raw_response.data.strip()
                 if "```json" in clean_json_str:
@@ -195,7 +211,7 @@ class QwenProvider(BaseLLMProvider):
                 return LLMResponse[T](
                     data=validated_data,
                     raw_response=raw_response.data,
-                    usage=raw_response.usage,
+                    usage=cumulative_usage,
                     latency_seconds=latency,
                     model_name=self.model_name,
                     provider=self.provider_name,
@@ -216,8 +232,12 @@ class QwenProvider(BaseLLMProvider):
                 await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
 
         if isinstance(last_exception, LLMValidationError):
+            last_exception.usage = cumulative_usage
+            last_exception.latency_seconds = time.perf_counter() - start_time
             raise last_exception
         raise LLMValidationError(
             f"Failed to produce valid output for {response_model.__name__} "
-            f"after {self.max_retries} attempts: {last_exception}"
+            f"after {self.max_retries} attempts: {last_exception}",
+            usage=cumulative_usage,
+            latency_seconds=time.perf_counter() - start_time
         )

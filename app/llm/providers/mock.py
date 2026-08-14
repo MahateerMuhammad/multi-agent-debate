@@ -80,7 +80,9 @@ class MockLLMProvider(BaseLLMProvider):
 
         if self.simulate_invalid_json:
             raise LLMValidationError(
-                f"Mock generated malformed output for {response_model.__name__}"
+                f"Mock generated malformed output for {response_model.__name__}",
+                usage=LLMUsage(prompt_tokens=50, completion_tokens=25, total_tokens=75),
+                latency_seconds=0.1
             )
 
         start_time = time.perf_counter()

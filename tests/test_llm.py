@@ -62,6 +62,14 @@ async def test_malformed_structured_output_rejection() -> None:
     assert (
         "malformed output" in str(exc_info.value).lower() or "failed" in str(exc_info.value).lower()
     )
+    
+    # Regression Test: Verify token tracking on failed structured output validation
+    assert exc_info.value.usage is not None
+    assert exc_info.value.usage.total_tokens is not None
+    # Assuming 3 max retries (each retry produces tokens, cumulative should be greater than a single call)
+    assert exc_info.value.usage.total_tokens > 0
+    assert exc_info.value.latency_seconds is not None
+    assert exc_info.value.latency_seconds > 0.0
 
 
 @pytest.mark.asyncio

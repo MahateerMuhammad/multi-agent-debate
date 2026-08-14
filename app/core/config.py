@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 
     # Open-Source LLM Configuration (Nemotron 70B default)
-    LLM_PROVIDER: str = "openrouter"  # Options: "openrouter", "qwen", "ollama", "vllm", "mock"
-    LLM_MODEL: str = "nvidia/llama-3.1-nemotron-70b-instruct:free"
-    LLM_BASE_URL: str = "https://openrouter.ai/api/v1"
+    LLM_PROVIDER: str = "openrouter"  # We use the openrouter provider adapter for openai-compatible endpoints
+    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_API_KEY: str = ""
 
     # Guardrails & Cost Controls

@@ -163,27 +163,31 @@ class QwenProvider(BaseLLMProvider):
         """Generate structured response matching Pydantic response_model schema."""
         self.validate_prompt(prompt)
 
-        response_format = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": response_model.__name__,
-                "strict": True,
-                "schema": response_model.model_json_schema()
-            }
-        }
+        # Generate XML format instruction dynamically from the Pydantic schema
+        schema_props = response_model.model_json_schema().get("properties", {})
+        xml_template = "\n".join(f"<{key}>...</{key}>" for key in schema_props.keys())
+        
+        format_instruction = (
+            "\n\nYou MUST format your final answers using XML tags corresponding to the required fields.\n"
+            "You can think step-by-step or write your analysis outside the tags, but the final extracted values MUST be wrapped exactly like this:\n"
+            f"```xml\n{xml_template}\n```\n"
+            "For arrays/lists, separate items with a semicolon (;). For nested objects, just output a simple string and we will parse it."
+        )
 
-        full_prompt = prompt
+        full_prompt = f"{prompt}{format_instruction}"
         start_time = time.perf_counter()
         last_exception: Exception | None = None
         
         cumulative_usage = LLMUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
+        import re
+
         for attempt in range(1, self.max_retries + 1):
             try:
+                # Ask the model to generate plain text (no JSON schema constraints)
                 raw_response = await self.generate(
                     prompt=full_prompt,
                     system_prompt=system_prompt,
-                    response_format=response_format,
                     **kwargs,
                 )
                 
@@ -192,52 +196,57 @@ class QwenProvider(BaseLLMProvider):
                     cumulative_usage.prompt_tokens = (cumulative_usage.prompt_tokens or 0) + raw_response.usage.prompt_tokens
                 if raw_response.usage.completion_tokens is not None:
                     cumulative_usage.completion_tokens = (cumulative_usage.completion_tokens or 0) + raw_response.usage.completion_tokens
-                if raw_response.usage.total_tokens is not None:
-                    cumulative_usage.total_tokens = (cumulative_usage.total_tokens or 0) + raw_response.usage.total_tokens
+                cumulative_usage.total_tokens = (cumulative_usage.prompt_tokens or 0) + (cumulative_usage.completion_tokens or 0)
 
-                clean_json_str = raw_response.data.strip()
-                if "```json" in clean_json_str:
-                    match = re.search(r"```json\s*(.*?)\s*```", clean_json_str, re.DOTALL)
+                # Extract XML tags using Regex
+                text = raw_response.data
+                extracted_dict = {}
+                for key, prop_info in schema_props.items():
+                    match = re.search(f"<{key}>(.*?)</{key}>", text, re.DOTALL | re.IGNORECASE)
                     if match:
-                        clean_json_str = match.group(1)
-                elif "```" in clean_json_str:
-                    match = re.search(r"```\s*(.*?)\s*```", clean_json_str, re.DOTALL)
-                    if match:
-                        clean_json_str = match.group(1)
+                        val = match.group(1).strip()
+                        # Simple type casting based on Pydantic schema types
+                        prop_str = str(prop_info).lower()
+                        if 'array' in prop_str:
+                            extracted_dict[key] = [v.strip() for v in val.split(';') if v.strip()]
+                        elif 'number' in prop_str or 'integer' in prop_str or 'float' in prop_str:
+                            try:
+                                import re as inner_re
+                                float_match = inner_re.search(r"[-+]?\d*\.\d+|\d+", val)
+                                if float_match:
+                                    extracted_dict[key] = float(float_match.group())
+                                else:
+                                    extracted_dict[key] = 0.0
+                            except Exception:
+                                extracted_dict[key] = 0.0
+                        elif 'boolean' in prop_str:
+                            extracted_dict[key] = val.lower() in ('true', '1', 'yes')
+                        else:
+                            extracted_dict[key] = val
 
-                validated_data = response_model.model_validate_json(clean_json_str)
-                latency = time.perf_counter() - start_time
-
+                # The shock-absorber validator in schemas.py will handle any missing keys!
+                parsed_obj = response_model(**extracted_dict)
+                
                 return LLMResponse[T](
-                    data=validated_data,
-                    raw_response=raw_response.data,
+                    data=parsed_obj,
+                    raw_response=text,
                     usage=cumulative_usage,
-                    latency_seconds=latency,
+                    latency_seconds=time.perf_counter() - start_time,
                     model_name=self.model_name,
                     provider=self.provider_name,
                 )
-
-            except (json.JSONDecodeError, ValidationError) as e:
-                logger.warning(
-                    f"Structured validation failed attempt {attempt}/{self.max_retries} "
-                    f"for {response_model.__name__}: {e}"
-                )
+                
+            except Exception as e:
+                # Catch Pydantic validation errors or missing tag errors
                 last_exception = LLMValidationError(
-                    f"Failed to validate response against {response_model.__name__}: {e}"
+                    f"Failed to parse XML into {response_model.__name__}: {str(e)}"
                 )
-            except LLMError as e:
-                last_exception = e
+                last_exception.usage = cumulative_usage
+                last_exception.latency_seconds = time.perf_counter() - start_time
 
             if attempt < self.max_retries:
                 await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
 
-        if isinstance(last_exception, LLMValidationError):
-            last_exception.usage = cumulative_usage
-            last_exception.latency_seconds = time.perf_counter() - start_time
+        if last_exception:
             raise last_exception
-        raise LLMValidationError(
-            f"Failed to produce valid output for {response_model.__name__} "
-            f"after {self.max_retries} attempts: {last_exception}",
-            usage=cumulative_usage,
-            latency_seconds=time.perf_counter() - start_time
-        )
+        raise LLMProviderError("Exhausted retries.")

@@ -30,9 +30,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager for startup and shutdown logging."""
     setup_logging(log_level=settings.LOG_LEVEL, log_format=settings.LOG_FORMAT)
     logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} [{settings.ENVIRONMENT}]")
-    yield
+    
+    # Eagerly initialize the LLM provider singleton to prevent cold-start race conditions
     from app.llm.factory import get_llm_provider
     provider = get_llm_provider()
+    logger.info(f"Initialized LLM provider pool: {provider.provider_name}")
+    
+    yield
+    
     await provider.aclose()
     logger.info(f"Shutting down {settings.PROJECT_NAME}")
 

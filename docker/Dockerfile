@@ -1,7 +1,8 @@
 FROM python:3.10-slim
 
-# Create a non-root user
-RUN addgroup --system appgroup && adduser --system --group appuser
+# Create a non-root user with an explicit UID/GID for predictable volume permissions
+RUN addgroup --system --gid 1000 appgroup && \
+    adduser --system --uid 1000 --gid 1000 --no-create-home appuser
 
 WORKDIR /app
 

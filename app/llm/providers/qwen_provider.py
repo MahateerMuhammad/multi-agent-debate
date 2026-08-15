@@ -56,7 +56,9 @@ class QwenProvider(BaseLLMProvider):
         import httpx
         # Strict timeout on connection pool
         strict_timeout = httpx.Timeout(connect=5.0, read=timeout, write=5.0, pool=5.0)
-        self.client = httpx.AsyncClient(timeout=strict_timeout)
+        # Ensure pool is large enough for high concurrency (e.g. 5 concurrent debates * 25 calls)
+        limits = httpx.Limits(max_connections=200, max_keepalive_connections=50)
+        self.client = httpx.AsyncClient(timeout=strict_timeout, limits=limits)
 
     @property
     def provider_name(self) -> str:

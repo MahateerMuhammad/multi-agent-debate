@@ -139,3 +139,61 @@ class FullDebateRunner:
             total_latency_seconds=total_latency,
             total_tokens=total_tokens,
         )
+
+    async def run_full_debate_stream(
+        self,
+        topic: str,
+        context: dict[str, Any] | None = None,
+    ) -> Any:
+        """Stream 4-stage pipeline events as Server-Sent Events (JSON strings)."""
+        import json
+        from collections.abc import AsyncGenerator
+
+        async def _stream() -> AsyncGenerator[str, None]:
+            # 1. Proponent
+            yield json.dumps({"event": "status", "data": "Proponent is researching and drafting argument..."}) + "\n"
+            prop_res = await self.proponent.construct_argument(topic, context=context)
+            yield json.dumps({"event": "proponent", "data": prop_res.data.model_dump()}) + "\n"
+
+            # 2. Opponent
+            yield json.dumps({"event": "status", "data": "Opponent is analyzing claim and drafting rebuttal..."}) + "\n"
+            opp_res = await self.opponent.construct_rebuttal(
+                topic, proponent_argument=prop_res.data, context=context
+            )
+            yield json.dumps({"event": "opponent", "data": opp_res.data.model_dump()}) + "\n"
+
+            # 3. Critic
+            yield json.dumps({"event": "status", "data": "Critic is evaluating logical fallacies..."}) + "\n"
+            critic_res = await self.critic.evaluate_debate(
+                topic, proponent_argument=prop_res.data, opponent_rebuttal=opp_res.data, context=context
+            )
+            yield json.dumps({"event": "critic", "data": critic_res.data.model_dump()}) + "\n"
+
+            # 4. Judge
+            yield json.dumps({"event": "status", "data": "Judge is assigning blind rubric scores..."}) + "\n"
+            blind_mapping = {"Position A": "Proponent", "Position B": "Opponent"}
+            position_a_text = f"Claim: {prop_res.data.claim}\nReasoning: {', '.join(prop_res.data.reasoning)}\nEvidence: {', '.join(prop_res.data.supporting_evidence)}"
+            position_b_text = f"Target Claim: {opp_res.data.target_claim}\nCounter Arguments: {', '.join(opp_res.data.counter_arguments)}\nFlaws Identified: {', '.join(opp_res.data.flaws_identified)}"
+
+            judge_res = await self.judge.judge_debate(
+                topic=topic,
+                position_a_arg=position_a_text,
+                position_b_arg=position_b_text,
+                critic_evaluation=critic_res.data,
+                context=context,
+            )
+            
+            raw_winner = judge_res.data.winner.strip()
+            unblinded_winner = blind_mapping.get(raw_winner, raw_winner)
+            if unblinded_winner not in ("Proponent", "Opponent", "Tie"):
+                unblinded_winner = "Proponent" if "A" in raw_winner else ("Opponent" if "B" in raw_winner else "Tie")
+
+            final_result = {
+                "winner": unblinded_winner,
+                "scores": judge_res.data.model_dump(),
+                "total_latency": prop_res.latency_seconds + opp_res.latency_seconds + critic_res.latency_seconds + judge_res.latency_seconds,
+                "total_tokens": (prop_res.usage.total_tokens or 0) + (opp_res.usage.total_tokens or 0) + (critic_res.usage.total_tokens or 0) + (judge_res.usage.total_tokens or 0)
+            }
+            yield json.dumps({"event": "judge", "data": final_result}) + "\n"
+
+        return _stream()

@@ -228,8 +228,8 @@ class JudgeOutput(BaseModel):
     rubric_scores: list[RubricDimensionScore] = Field(
         ..., description="Detailed 5-dimension rubric scores with explanations"
     )
-    total_score_a: float = Field(..., ge=0.0, le=1.0, description="Overall score for Position A")
-    total_score_b: float = Field(..., ge=0.0, le=1.0, description="Overall score for Position B")
+    total_score_a: float = Field(..., ge=0.0, description="Overall score for Position A")
+    total_score_b: float = Field(..., ge=0.0, description="Overall score for Position B")
     key_deciding_factors: list[str] = Field(
         ..., description="Primary deciding factors leading to the verdict"
     )

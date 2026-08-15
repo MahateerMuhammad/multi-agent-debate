@@ -127,6 +127,10 @@ class ArgumentOutput(BaseModel):
     supporting_evidence: list[str] = Field(
         default_factory=list, description="Evidence items supporting the claim"
     )
+    sources: list[str] = Field(
+        default_factory=list, 
+        description="Exact citations for the evidence. You MUST provide real, specific URLs, DOIs, or exact academic paper titles/authors. DO NOT use vague institutional references (e.g. 'NeurIPS papers')."
+    )
     confidence: Optional[float] = Field(
         default=None, ge=0.0, le=1.0, description="Self-assessed confidence score (0 to 1)"
     )
@@ -144,6 +148,10 @@ class RebuttalOutput(BaseModel):
     counter_arguments: list[str] = Field(..., description="Key rebuttal arguments")
     flaws_identified: list[str] = Field(
         default_factory=list, description="Flaws identified in opposing reasoning"
+    )
+    sources: list[str] = Field(
+        default_factory=list, 
+        description="Exact citations for the counter-arguments. You MUST provide real, specific URLs, DOIs, or exact academic paper titles/authors. DO NOT use vague institutional references (e.g. 'Google Research publications')."
     )
 
 

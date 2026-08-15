@@ -1,6 +1,6 @@
-"use client";
-
 import React from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
+import { Progress } from "./ui/progress";
 
 export default function JudgeVerdict({ data }: { data: any }) {
   const winner = data.winner;
@@ -10,92 +10,60 @@ export default function JudgeVerdict({ data }: { data: any }) {
   const confidence = scores.confidence_score ? Math.min(100, Math.max(0, scores.confidence_score * 100)) : 0;
   
   return (
-    <div className="premium-card" style={{ 
-      borderTop: `6px solid var(--teal-primary)`,
-      backgroundColor: "var(--bg-base)",
-      color: "var(--ink)",
-      marginTop: "16px"
-    }}>
-      <div style={{ textAlign: "center", marginBottom: "32px" }}>
-        <h2 className="font-serif" style={{ fontSize: "2.5rem", color: "var(--teal-deep)", marginBottom: "8px" }}>
-          Final Verdict
-        </h2>
-        <p style={{ fontSize: "1.1rem", color: "var(--teal-muted)" }}>
+    <Card className="mt-4 border-t-8 border-t-primary bg-card/50 shadow-md">
+      <CardHeader className="text-center pb-8 pt-8">
+        <CardTitle className="font-serif text-4xl text-primary mb-2">Final Verdict</CardTitle>
+        <CardDescription className="text-base">
           Evaluated by the Blind Judge based on logical rigor and factual accuracy.
-        </p>
-      </div>
-
-      <div style={{ 
-        display: "flex", 
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: "32px",
-        padding: "32px", 
-        backgroundColor: "var(--bg-surface)", 
-        borderRadius: "8px",
-        marginBottom: "32px",
-        border: "1px solid rgba(124, 140, 138, 0.2)"
-      }}>
-        <div style={{ flex: "1 1 200px" }}>
-          <h3 style={{ fontSize: "0.9rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--teal-muted)", marginBottom: "12px" }}>
-            Declared Winner
-          </h3>
-          <div className="font-serif" style={{ fontSize: "2.5rem", color: "var(--teal-primary)" }}>
-            {winner}
-          </div>
-        </div>
-        
-        {scores.confidence_score !== undefined && (
-          <div style={{ flex: "2 1 300px" }}>
-            <h3 style={{ fontSize: "0.9rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--teal-muted)", marginBottom: "12px" }}>
-              Confidence Score
+        </CardDescription>
+      </CardHeader>
+      
+      <CardContent className="space-y-8">
+        <div className="flex flex-row flex-wrap gap-8 p-8 bg-card rounded-xl border border-border/50">
+          <div className="flex-1 min-w-[200px]">
+            <h3 className="text-xs uppercase tracking-widest text-muted-foreground mb-3">
+              Declared Winner
             </h3>
-            <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-              <div className="font-mono" style={{ fontSize: "2rem", color: "var(--teal-deep)" }}>
-                {confidence.toFixed(0)}%
-              </div>
-              <div style={{ flex: 1, height: "8px", backgroundColor: "var(--bg-base)", borderRadius: "4px", overflow: "hidden" }}>
-                <div style={{ 
-                  height: "100%", 
-                  width: `${confidence}%`, 
-                  backgroundColor: "var(--teal-primary)",
-                  transition: "width 1s cubic-bezier(0.16, 1, 0.3, 1)"
-                }} />
-              </div>
+            <div className="font-serif text-4xl text-primary">
+              {winner}
             </div>
           </div>
+          
+          {scores.confidence_score !== undefined && (
+            <div className="flex-[2] min-w-[300px]">
+              <h3 className="text-xs uppercase tracking-widest text-muted-foreground mb-3">
+                Confidence Score
+              </h3>
+              <div className="flex items-center gap-4">
+                <div className="font-mono text-3xl text-primary">
+                  {confidence.toFixed(0)}%
+                </div>
+                <Progress value={confidence} className="h-3 flex-1" />
+              </div>
+            </div>
+          )}
+        </div>
+        
+        {scores.verdict_summary && (
+          <div className="px-4">
+            <h4 className="text-xs uppercase tracking-widest text-primary mb-3">
+              Judgement Rationale
+            </h4>
+            <p className="text-lg leading-relaxed text-foreground/90">{scores.verdict_summary}</p>
+          </div>
         )}
-      </div>
-      
-      {scores.verdict_summary && (
-        <div style={{ padding: "0 16px", marginBottom: "32px" }}>
-          <h4 style={{ fontSize: "0.9rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--teal-deep)", marginBottom: "12px" }}>
-            Judgement Rationale
-          </h4>
-          <p style={{ fontSize: "1.1rem", lineHeight: "1.7" }}>{scores.verdict_summary}</p>
-        </div>
-      )}
-      
-      {(data.total_latency || data.total_tokens) && (
-        <div style={{ 
-          marginTop: "32px", 
-          paddingTop: "24px", 
-          borderTop: "1px solid rgba(124, 140, 138, 0.2)", 
-          display: "flex", 
-          gap: "32px",
-          color: "var(--teal-muted)",
-          fontSize: "0.9rem",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em"
-        }}>
-          {data.total_latency && (
-            <div>Execution Time: <span className="font-mono" style={{ color: "var(--ink)", marginLeft: "8px", fontSize: "1rem" }}>{data.total_latency.toFixed(2)}s</span></div>
-          )}
-          {data.total_tokens && (
-            <div>Tokens Processed: <span className="font-mono" style={{ color: "var(--ink)", marginLeft: "8px", fontSize: "1rem" }}>{data.total_tokens.toLocaleString()}</span></div>
-          )}
-        </div>
-      )}
-    </div>
+        
+        {(data.total_latency || data.total_tokens) && (
+          <div className="mt-8 pt-6 border-t border-border/50 flex flex-wrap gap-8 text-xs uppercase tracking-widest text-muted-foreground px-4">
+            {data.total_latency && (
+              <div>Execution Time: <span className="font-mono text-sm text-foreground ml-2">{data.total_latency.toFixed(2)}s</span></div>
+            )}
+            {data.total_tokens && (
+              <div>Tokens Processed: <span className="font-mono text-sm text-foreground ml-2">{data.total_tokens.toLocaleString()}</span></div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

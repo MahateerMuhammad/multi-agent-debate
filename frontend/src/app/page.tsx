@@ -19,7 +19,7 @@ export default function Home() {
   const startDebate = async (debateTopic: string) => {
     setTopic(debateTopic);
     setIsRunning(true);
-    setStatus("Connecting to debate server...");
+    setStatus("Initializing debate...");
     
     // Reset state
     setProponentData(null);
@@ -31,7 +31,10 @@ export default function Home() {
       const response = await fetch("http://localhost:8000/api/v1/debate/run-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: debateTopic, rounds: 1 }),
+        body: JSON.stringify({
+          topic: debateTopic,
+          max_rounds: 3,
+        }),
       });
 
       if (!response.body) {
@@ -62,66 +65,68 @@ export default function Home() {
                 setCriticData(event.data);
               } else if (event.event === "judge") {
                 setJudgeData(event.data);
-                setStatus("Debate concluded.");
-                setIsRunning(false);
+              } else if (event.event === "error") {
+                console.error("Debate error:", event.data);
+                setStatus("An error occurred during the debate.");
               }
             } catch (e) {
-              console.error("Failed to parse chunk", line);
+              console.error("Failed to parse event line", line, e);
             }
           }
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setStatus("Error: " + err.message);
+      setStatus("Failed to connect to debate stream.");
+    } finally {
       setIsRunning(false);
     }
   };
 
   return (
-    <main style={{ maxWidth: "1200px", margin: "0 auto", padding: "64px 24px" }}>
-      <header style={{ marginBottom: "64px", textAlign: "center" }}>
-        <h1 className="font-serif" style={{ fontSize: "3rem", fontWeight: "400", color: "var(--teal-deep)" }}>
-          Multi-Agent Debate System
+    <main className="max-w-[1200px] mx-auto px-6 py-16">
+      <header className="mb-12">
+        <h1 className="font-serif text-3xl text-primary mb-1">
+          Execution Environment
         </h1>
-        <p style={{ fontSize: "1.1rem", color: "var(--teal-muted)", marginTop: "12px", maxWidth: "600px", margin: "12px auto 0" }}>
-          Observe autonomous AI agents construct arguments, rebuttals, and evaluations in real-time.
+        <p className="font-sans text-sm text-muted-foreground">
+          Multi-Agent Evaluation Pipeline
         </p>
       </header>
 
-      {!isRunning && !judgeData && (
-        <div className="premium-card animate-in" style={{ maxWidth: "600px", margin: "0 auto" }}>
+      {!isRunning && (
+        <div className="animate-in-subtle max-w-[600px] mx-auto bg-card border border-border/20 rounded-xl p-8 shadow-sm">
           <DebateForm onSubmit={startDebate} />
         </div>
       )}
 
       {topic && (
-        <div className="animate-in" style={{ marginBottom: "48px", textAlign: "center" }}>
-          <div style={{ fontSize: "0.9rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--teal-muted)", marginBottom: "8px" }}>
+        <div className="animate-in-subtle text-center mb-12">
+          <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
             Proposition
           </div>
-          <div className="font-serif" style={{ fontSize: "1.75rem", color: "var(--teal-deep)" }}>
+          <div className="font-serif text-2xl text-primary">
             {topic}
           </div>
         </div>
       )}
 
       {isRunning && (
-        <div style={{ marginBottom: "48px", display: "flex", justifyContent: "center" }}>
+        <div className="mb-12 flex justify-center">
           <LiveStatus status={status} />
         </div>
       )}
 
       {/* Grid Layout for Proponent and Opponent */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: "32px", marginBottom: "32px" }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
         {(isRunning || proponentData) && (
-          <div className="animate-in">
+          <div className="animate-in-subtle">
             <AgentCard role="Proponent" data={proponentData} isLoading={isRunning && !proponentData} />
           </div>
         )}
         
         {(proponentData || opponentData) && (
-          <div className="animate-in" style={{ animationDelay: "0.1s" }}>
+          <div className="animate-in-subtle [animation-delay:100ms]">
             <AgentCard role="Opponent" data={opponentData} isLoading={!opponentData && !!proponentData} />
           </div>
         )}
@@ -129,14 +134,14 @@ export default function Home() {
 
       {/* Centered layout for Critic */}
       {(opponentData || criticData) && (
-        <div className="animate-in" style={{ maxWidth: "800px", margin: "0 auto 48px", animationDelay: "0.2s" }}>
+        <div className="animate-in-subtle [animation-delay:200ms] max-w-[800px] mx-auto mb-12">
           <AgentCard role="Critic" data={criticData} isLoading={!criticData && !!opponentData} />
         </div>
       )}
       
       {/* Full width verdict for Judge */}
       {judgeData && (
-        <div className="animate-in" style={{ animationDelay: "0.3s" }}>
+        <div className="animate-in-subtle [animation-delay:300ms]">
           <JudgeVerdict data={judgeData} />
         </div>
       )}

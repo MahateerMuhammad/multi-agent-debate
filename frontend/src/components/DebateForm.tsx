@@ -2,6 +2,9 @@
 
 import React, { useState } from "react";
 
+import { Textarea } from "./ui/textarea";
+import { Button } from "./ui/button";
+
 export default function DebateForm({ onSubmit }: { onSubmit: (topic: string) => void }) {
   const [topic, setTopic] = useState("");
 
@@ -13,25 +16,24 @@ export default function DebateForm({ onSubmit }: { onSubmit: (topic: string) => 
   };
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-      <div>
-        <label htmlFor="topic" className="font-sans" style={{ display: "block", marginBottom: "8px", fontWeight: "500", color: "var(--ink)" }}>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <div className="space-y-2">
+        <label htmlFor="topic" className="block text-sm font-medium text-foreground">
           Proposition
         </label>
-        <textarea
+        <Textarea
           id="topic"
-          className="premium-input font-sans"
           placeholder="Enter the claim to be debated..."
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           required
           rows={4}
-          style={{ resize: "vertical", minHeight: "100px", lineHeight: "1.5" }}
+          className="resize-y min-h-[120px] text-base"
         />
       </div>
-      <button type="submit" className="premium-button" style={{ alignSelf: "flex-start" }}>
+      <Button type="submit" size="lg" className="w-fit">
         Execute Run
-      </button>
+      </Button>
     </form>
   );
 }

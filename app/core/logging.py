@@ -7,11 +7,13 @@ from typing import Any
 
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured application logs."""
-
     def format(self, record: logging.LogRecord) -> str:
+        from asgi_correlation_id import correlation_id
+
         log_data: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
+            "request_id": correlation_id.get() or "system",
             "logger": record.name,
             "message": record.getMessage(),
             "module": record.module,

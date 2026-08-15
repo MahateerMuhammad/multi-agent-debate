@@ -3,14 +3,20 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import FastAPI
+from asgi_correlation_id import CorrelationIdMiddleware
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from app.api.routes import router as api_router
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
 
 logger = get_logger("app.api.main")
+limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
@@ -28,6 +34,19 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error(f"Unhandled system error: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal system error occurred. Please try again later."},
+    )
+
+app.add_middleware(CorrelationIdMiddleware)
 
 if settings.CORS_ORIGINS:
     app.add_middleware(

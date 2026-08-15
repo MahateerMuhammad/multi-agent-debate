@@ -1,15 +1,19 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.api.schemas.debate import DebateRequest, DebateResponse
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post("/run", response_model=DebateResponse)
-async def run_debate(request: DebateRequest) -> DebateResponse:
+@limiter.limit("5/minute")
+async def run_debate(request: Request, body: DebateRequest) -> DebateResponse:
     return DebateResponse(
-        topic=request.topic,
+        topic=body.topic,
         winner="Proponent",
-        summary=f"Debate completed for topic: {request.topic}",
+        summary=f"Debate completed for topic: {body.topic}",
         arguments=[],
     )

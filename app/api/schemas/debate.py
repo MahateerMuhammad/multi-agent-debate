@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class DebateRequest(BaseModel):
-    topic: str = Field(..., description="The debate topic or proposition")
+    topic: str = Field(..., max_length=500, description="The debate topic or proposition")
     rounds: int = Field(default=3, ge=1, le=10, description="Number of debate rounds")
 
 

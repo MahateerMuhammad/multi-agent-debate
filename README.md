@@ -14,76 +14,124 @@ True reasoning requires adversarial pressure. By explicitly splitting responsibi
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Debate Architecture
 
-The system is built on a decoupled, asynchronous architecture.
+The system is built on a decoupled, asynchronous architecture designed for deterministic state management and high-throughput LLM streaming.
 
 - **Backend**: FastAPI, Python 3.9+, Pydantic (Strict Schema Enforcement), HTTPX.
 - **Frontend**: Next.js 15+ (App Router), Tailwind CSS v4, shadcn/ui.
 - **LLM Engine**: Provider-agnostic factory (Groq, OpenRouter, vLLM, local Ollama) utilizing structural XML/JSON schema guarantees.
 
+### System Topology
+
 ```mermaid
-graph TD
-    User([User Client]) -->|Next.js Frontend| StreamAPI[FastAPI /run-stream]
-    StreamAPI --> Coordinator[Debate Runner]
+flowchart TB
+    subgraph Frontend [Client Tier]
+        UI[Next.js App Router]
+        Stream[SSE Stream Parser]
+    end
+
+    subgraph API [API Tier - FastAPI]
+        Route[POST /api/v1/debate/run-stream]
+        Validator[Pydantic Input Validator]
+    end
+
+    subgraph Core [Execution Engine]
+        Runner[Asynchronous Debate Coordinator]
+        State[(Debate Transcript State)]
+    end
+
+    subgraph Agents [Multi-Agent Swarm]
+        Prop[Proponent Agent]
+        Opp[Opponent Agent]
+        Crit[Critic Agent]
+        Judge[Blind Judge Agent]
+        Res[Researcher Agent]
+    end
+
+    subgraph External [LLM Providers]
+        Groq[Groq API]
+        OpenRouter[OpenRouter API]
+    end
+
+    UI -->|JSON Payload| Route
+    Route --> Validator
+    Validator --> Runner
     
-    Coordinator -->|Round N| Proponent[Proponent Agent]
-    Coordinator -->|Round N| Opponent[Opponent Agent]
+    Runner <--> State
+    Runner -->|Round 1..N| Prop
+    Runner -->|Round 1..N| Opp
+    Runner -->|Synthesis| Crit
+    Runner -->|Evaluation| Judge
     
-    Proponent -->|Arguments & Sources| Critic[Critic Agent]
-    Opponent -->|Rebuttals & Flaws| Critic
+    Prop & Opp & Crit & Judge & Res -->|Schema-bound Prompts| External
     
-    Critic -->|Fallacy Analysis| Coordinator
-    Coordinator -->|Final Context| Judge[Blind Judge Agent]
+    Runner -.->|Yields JSON Chunks| Stream
+    Stream -.->|React State Updates| UI
+```
+
+---
+
+## 🧠 LangGraph-Style State Machine
+
+While the system is powered by a custom asynchronous coordinator, it strictly follows a directed cyclic graph (DCG) state machine pattern commonly seen in LangGraph. The state is strictly immutable during agent execution and appended sequentially.
+
+### State Execution Graph
+
+```mermaid
+stateDiagram-v2
+    [*] --> Initialization
     
-    Judge -->|Verdict & Scores| StreamAPI
+    Initialization --> DataEnrichment: Topic Submitted
+    
+    state DataEnrichment {
+        [*] --> ResearcherNode
+        ResearcherNode --> VectorStore: Query FAISS/Chroma
+        VectorStore --> ResearcherNode: Return Context
+        ResearcherNode --> [*]: Inject Background Context
+    }
+    
+    DataEnrichment --> DebateLoop: Context Ready
+    
+    state DebateLoop {
+        [*] --> ProponentNode
+        ProponentNode --> LLM_A: Generate Affirmative
+        LLM_A --> Pydantic_A: Validate Schema
+        Pydantic_A --> StateUpdate_A: Append Argument
+        
+        StateUpdate_A --> OpponentNode
+        OpponentNode --> LLM_B: Generate Rebuttal
+        LLM_B --> Pydantic_B: Validate Schema
+        Pydantic_B --> StateUpdate_B: Append Rebuttal
+        
+        StateUpdate_B --> RoundCheck
+        RoundCheck --> ProponentNode: Round < Max Rounds
+        RoundCheck --> [*]: Round == Max Rounds
+    }
+    
+    DebateLoop --> CriticNode: Loop Complete
+    
+    state CriticNode {
+        [*] --> AnalyzeTranscript
+        AnalyzeTranscript --> FlagFallacies
+        FlagFallacies --> [*]: Append Analysis
+    }
+    
+    CriticNode --> JudgeNode
+    
+    state JudgeNode {
+        [*] --> AnonymizeState
+        AnonymizeState --> ScoreRubric
+        ScoreRubric --> CalculateConfidence
+        CalculateConfidence --> [*]: Declare Winner
+    }
+    
+    JudgeNode --> [*]: Debate Concluded
 ```
 
 ---
 
 ## 🤖 Agent Responsibilities
-
-1. **Proponent**: Constructs the strongest possible affirmative argument. Required to provide step-by-step reasoning and exact, verifiable citations.
-2. **Opponent**: Critically analyzes the Proponent's claims. Identifies logical leaps and constructs aggressive, sourced counter-arguments.
-3. **Critic**: A neutral observer that scans both arguments purely for logical fallacies, unsupported claims, and cognitive bias.
-4. **Judge**: A blind evaluator that receives the anonymized transcript and scores the debate across 5 dimensions (Rigor, Accuracy, Evidence, etc.) before declaring a final winner and confidence score.
-5. **Researcher** *(Optional Data Layer)*: Pre-fetches context and vector-search data to ground the debate in verified facts.
-
----
-
-## 🔄 Debate Workflow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Runner
-    participant Prop as Proponent
-    participant Opp as Opponent
-    participant Critic
-    participant Judge
-    
-    User->>Runner: Submit Proposition
-    
-    loop Max Rounds (e.g., 3)
-        Runner->>Prop: Request Affirmative (Topic, Context)
-        Prop-->>Runner: Return Argument + Citations
-        
-        Runner->>Opp: Request Rebuttal (Prop's Claim)
-        Opp-->>Runner: Return Counter-Argument
-    end
-    
-    Runner->>Critic: Submit Full Transcript
-    Critic-->>Runner: Return Fallacy Analysis
-    
-    Runner->>Judge: Submit Anonymized Transcript + Analysis
-    Judge-->>Runner: Final Verdict & Confidence Score
-    
-    Runner-->>User: Streamed Final Results
-```
-
----
-
-## 📚 RAG Pipeline (Knowledge Grounding)
 While agents are capable of zero-shot retrieval from their pre-trained weights, the system supports a Retrieval-Augmented Generation (RAG) hook via the `Researcher` agent. 
 - **Pre-Debate**: The Researcher takes the topic, queries a vector store (e.g., FAISS/Chroma) populated with validated documents (research papers, policy docs).
 - **Injection**: This factual context is aggressively injected into the `<untrusted_input>` context tags for the Proponent and Opponent, grounding the debate in hard data rather than pre-trained latent space.

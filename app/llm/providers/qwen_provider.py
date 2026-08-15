@@ -52,6 +52,11 @@ class QwenProvider(BaseLLMProvider):
         )
         if not self.base_url:
             raise LLMConfigurationError("LLM base_url must be provided for QwenProvider.")
+            
+        import httpx
+        # Strict timeout on connection pool
+        strict_timeout = httpx.Timeout(connect=5.0, read=timeout, write=5.0, pool=5.0)
+        self.client = httpx.AsyncClient(timeout=strict_timeout)
 
     @property
     def provider_name(self) -> str:
@@ -77,12 +82,16 @@ class QwenProvider(BaseLLMProvider):
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
+        
+        # Hard clamp max_tokens to prevent DoW regardless of caller
+        requested_tokens = int(kwargs.get("max_tokens", self.max_tokens))
+        safe_max_tokens = min(requested_tokens, self.max_tokens)
 
         payload = {
             "model": self.model_name,
             "messages": messages,
             "temperature": kwargs.get("temperature", self.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "max_tokens": safe_max_tokens,
         }
         if "response_format" in kwargs:
             payload["response_format"] = kwargs["response_format"]
@@ -90,62 +99,61 @@ class QwenProvider(BaseLLMProvider):
         start_time = time.perf_counter()
         last_exception: Exception | None = None
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for attempt in range(1, self.max_retries + 1):
-                try:
-                    log_msg = (
-                        f"Attempt {attempt}/{self.max_retries} posting to {endpoint} "
-                        f"with model {self.model_name}"
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                log_msg = (
+                    f"Attempt {attempt}/{self.max_retries} posting to {endpoint} "
+                    f"with model {self.model_name}"
+                )
+                logger.debug(self._sanitize_log(log_msg))
+
+                response = await self.client.post(
+                    endpoint,
+                    json=payload,
+                    headers=self._get_headers(),
+                )
+
+                if response.status_code in (401, 403):
+                    raise LLMConfigurationError(
+                        f"Authentication failed for provider {self.provider_name}: {response.text}"
                     )
-                    logger.debug(self._sanitize_log(log_msg))
-
-                    response = await client.post(
-                        endpoint,
-                        json=payload,
-                        headers=self._get_headers(),
-                    )
-
-                    if response.status_code in (401, 403):
-                        raise LLMConfigurationError(
-                            f"Authentication failed for provider {self.provider_name}: {response.text}"
-                        )
-                    if response.status_code != 200:
-                        raise LLMProviderError(
-                            f"Provider {self.provider_name} returned status {response.status_code}: "
-                            f"{response.text}"
-                        )
-
-                    res_json = response.json()
-                    content = res_json["choices"][0]["message"]["content"]
-                    usage_data = res_json.get("usage", {})
-
-                    usage = LLMUsage(
-                        prompt_tokens=usage_data.get("prompt_tokens", 0),
-                        completion_tokens=usage_data.get("completion_tokens", 0),
-                        total_tokens=usage_data.get("total_tokens", 0),
-                    )
-                    latency = time.perf_counter() - start_time
-
-                    return LLMResponse[str](
-                        data=content,
-                        raw_response=content,
-                        usage=usage,
-                        latency_seconds=latency,
-                        model_name=self.model_name,
-                        provider=self.provider_name,
+                if response.status_code != 200:
+                    raise LLMProviderError(
+                        f"Provider {self.provider_name} returned status {response.status_code}: "
+                        f"{response.text}"
                     )
 
-                except httpx.TimeoutException:
-                    last_exception = LLMTimeoutError(
-                        f"Request to {self.provider_name} timed out after {self.timeout}s"
-                    )
-                except (httpx.RequestError, LLMProviderError) as e:
-                    last_exception = e
-                except LLMConfigurationError:
-                    raise
+                res_json = response.json()
+                content = res_json["choices"][0]["message"]["content"]
+                usage_data = res_json.get("usage", {})
 
-                if attempt < self.max_retries:
-                    await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
+                usage = LLMUsage(
+                    prompt_tokens=usage_data.get("prompt_tokens", 0),
+                    completion_tokens=usage_data.get("completion_tokens", 0),
+                    total_tokens=usage_data.get("total_tokens", 0),
+                )
+                latency = time.perf_counter() - start_time
+
+                return LLMResponse[str](
+                    data=content,
+                    raw_response=content,
+                    usage=usage,
+                    latency_seconds=latency,
+                    model_name=self.model_name,
+                    provider=self.provider_name,
+                )
+
+            except httpx.TimeoutException:
+                last_exception = LLMTimeoutError(
+                    f"Request to {self.provider_name} timed out after {self.timeout}s"
+                )
+            except (httpx.RequestError, LLMProviderError) as e:
+                last_exception = e
+            except LLMConfigurationError:
+                raise
+
+            if attempt < self.max_retries:
+                await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
 
         if isinstance(last_exception, LLMTimeoutError):
             raise last_exception
@@ -250,3 +258,7 @@ class QwenProvider(BaseLLMProvider):
         if last_exception:
             raise last_exception
         raise LLMProviderError("Exhausted retries.")
+
+    async def aclose(self) -> None:
+        """Gracefully close the underlying HTTPX client connection pool."""
+        await self.client.aclose()

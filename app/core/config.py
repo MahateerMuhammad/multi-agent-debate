@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # Open-Source LLM Configuration (Nemotron 70B default)
     LLM_PROVIDER: str = "openrouter"  # We use the openrouter provider adapter for openai-compatible endpoints

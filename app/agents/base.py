@@ -42,6 +42,10 @@ class BaseAgent(ABC):
             raise ValueError("Debate topic cannot be empty or whitespace.")
 
         clean_topic = topic.strip()
+        
+        # Strip literal tags to prevent injection bypass
+        clean_topic = clean_topic.replace("<untrusted_input>", "").replace("</untrusted_input>", "")
+        
         if len(clean_topic) < 3:
             raise ValueError("Debate topic must be at least 3 characters long.")
 

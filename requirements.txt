@@ -10,3 +10,5 @@ pytest>=7.0.0
 
 asgi-correlation-id
 slowapi
+
+redis

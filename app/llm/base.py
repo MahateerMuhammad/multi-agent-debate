@@ -86,6 +86,10 @@ class BaseLLMProvider(ABC):
                     "Prompt injection or unauthorized override pattern detected."
                 )
 
+    async def aclose(self) -> None:
+        """Gracefully close resources. Override in subclasses."""
+        pass
+
     def _sanitize_log(self, text: str) -> str:
         """Sanitize sensitive credentials, API keys, and authorization headers from logs."""
         if not text:
